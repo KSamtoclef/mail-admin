@@ -1,18 +1,39 @@
 import type { NextRequest } from "next/server";
 
+function normalizeOrigin(value: string | null | undefined) {
+  if (!value) return null;
+  const trimmed = value.trim().replace(/\/$/, "");
+  if (!trimmed) return null;
+  try {
+    const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+export function getTrackingBaseUrl() {
+  return normalizeOrigin(
+    process.env.TRACKING_BASE_URL ||
+    process.env.VERCEL_PROJECT_PRODUCTION_URL ||
+    process.env.VERCEL_URL
+  );
+}
+
 export function getAllowedTrackingOrigins() {
   return (process.env.TRACKING_ALLOWED_ORIGINS ?? "")
     .split(",")
-    .map((value) => value.trim().replace(/\/$/, ""))
-    .filter(Boolean);
+    .map((value) => normalizeOrigin(value))
+    .filter((value): value is string => Boolean(value));
 }
 
 export function trackingIsConfigured() {
-  return Boolean(process.env.TRACKING_BASE_URL && getAllowedTrackingOrigins().length);
+  return Boolean(getTrackingBaseUrl() && getAllowedTrackingOrigins().length);
 }
 
 export function requestOrigin(request: NextRequest) {
-  return request.headers.get("origin")?.replace(/\/$/, "") ?? null;
+  return normalizeOrigin(request.headers.get("origin"));
 }
 
 export function isAllowedTrackingOrigin(request: NextRequest) {
