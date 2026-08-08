@@ -36,9 +36,11 @@ function verifySvix(payload: string, request: NextRequest) {
   }
 }
 
-function firstRecipient(payload: any) {
+function eventRecipientEmail(payload: any) {
   const to = payload?.data?.to;
-  return Array.isArray(to) && typeof to[0] === "string" ? to[0].trim().toLowerCase() : null;
+  if (Array.isArray(to) && typeof to[0] === "string") return to[0].trim().toLowerCase();
+  if (typeof payload?.data?.email === "string") return payload.data.email.trim().toLowerCase();
+  return null;
 }
 
 function taggedRecipientId(payload: any) {
@@ -68,8 +70,9 @@ export async function POST(request: NextRequest) {
 
   const eventType = typeof payload?.type === "string" ? payload.type : "unknown";
   const providerMessageId = typeof payload?.data?.email_id === "string" ? payload.data.email_id : null;
+  const broadcastId = typeof payload?.data?.broadcast_id === "string" ? payload.data.broadcast_id : null;
   const providerEventId = request.headers.get("svix-id");
-  const recipientEmail = firstRecipient(payload);
+  const recipientEmail = eventRecipientEmail(payload);
   const recipientIdTag = taggedRecipientId(payload);
   const supabase = getSupabaseAdmin() as any;
 
@@ -86,6 +89,15 @@ export async function POST(request: NextRequest) {
   }
   if (auditError) {
     return NextResponse.json({ ok: false, error: auditError.message }, { status: 500 });
+  }
+
+  if (eventType === "contact.updated" && recipientEmail && payload?.data?.unsubscribed === true) {
+    await supabase.from("contacts").update({ status: "unsubscribed" }).eq("email_normalized", recipientEmail);
+    await supabase.from("suppression_list").upsert({
+      email_normalized: recipientEmail,
+      reason: "resend:contact_unsubscribed"
+    }, { onConflict: "email_normalized" });
+    return NextResponse.json({ ok: true });
   }
 
   let recipientRow: { id: string; campaign_id: string; contact_id: string; provider_message_id?: string | null } | null = null;
@@ -106,6 +118,32 @@ export async function POST(request: NextRequest) {
       .eq("id", recipientIdTag)
       .maybeSingle();
     recipientRow = data ?? null;
+  }
+
+  if (!recipientRow && broadcastId && recipientEmail) {
+    const waveResult = await supabase
+      .from("campaign_broadcast_waves")
+      .select("id,campaign_id")
+      .eq("resend_broadcast_id", broadcastId)
+      .maybeSingle();
+
+    if (!waveResult.error && waveResult.data?.id) {
+      const contactResult = await supabase
+        .from("contacts")
+        .select("id")
+        .eq("email_normalized", recipientEmail)
+        .maybeSingle();
+
+      if (!contactResult.error && contactResult.data?.id) {
+        const result = await supabase
+          .from("campaign_recipients")
+          .select("id,campaign_id,contact_id,provider_message_id")
+          .eq("broadcast_wave_id", waveResult.data.id)
+          .eq("contact_id", contactResult.data.id)
+          .maybeSingle();
+        recipientRow = result.data ?? null;
+      }
+    }
   }
 
   const now = typeof payload?.created_at === "string" ? payload.created_at : new Date().toISOString();
@@ -160,7 +198,11 @@ export async function POST(request: NextRequest) {
       contact_id: recipientRow.contact_id,
       page_url: pageUrl,
       is_bot: false,
-      metadata: { provider: "resend", provider_message_id: providerMessageId }
+      metadata: {
+        provider: "resend",
+        provider_message_id: providerMessageId,
+        broadcast_id: broadcastId
+      }
     });
   }
 
