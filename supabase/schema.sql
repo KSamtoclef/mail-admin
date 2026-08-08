@@ -73,6 +73,16 @@ create table if not exists tracked_links (
   created_at timestamptz not null default now()
 );
 
+create table if not exists tracking_sites (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  site_url text not null,
+  origin text not null unique,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 create table if not exists sessions (
   id uuid primary key default gen_random_uuid(),
   contact_id uuid references contacts(id) on delete set null,
@@ -122,6 +132,7 @@ create table if not exists provider_webhook_events (
 create index if not exists idx_contact_imports_created_at on contact_imports(created_at desc);
 create index if not exists idx_campaign_recipients_campaign on campaign_recipients(campaign_id);
 create index if not exists idx_campaign_recipients_message on campaign_recipients(provider_message_id);
+create index if not exists idx_tracking_sites_active on tracking_sites(active, created_at desc);
 create index if not exists idx_events_campaign_time on events(campaign_id, occurred_at desc);
 create index if not exists idx_events_contact_time on events(contact_id, occurred_at desc);
 create index if not exists idx_events_session_time on events(session_id, occurred_at desc);
