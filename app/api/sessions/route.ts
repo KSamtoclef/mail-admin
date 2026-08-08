@@ -17,17 +17,17 @@ const sessionSchema = z.object({
 });
 
 export async function OPTIONS(request: NextRequest) {
-  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+  return new NextResponse(null, { status: 204, headers: await corsHeaders(request) });
 }
 
 export async function POST(request: NextRequest) {
-  const headers = corsHeaders(request);
+  const headers = await corsHeaders(request);
 
-  if (!trackingIsConfigured()) {
+  if (!(await trackingIsConfigured())) {
     return NextResponse.json({ ok: false, error: "Tracking is not configured" }, { status: 503, headers });
   }
 
-  if (!isAllowedTrackingOrigin(request)) {
+  if (!(await isAllowedTrackingOrigin(request))) {
     return NextResponse.json({ ok: false, error: "Origin not allowed" }, { status: 403, headers });
   }
 
