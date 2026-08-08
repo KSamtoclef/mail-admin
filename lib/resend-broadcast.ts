@@ -9,8 +9,13 @@ function apiKey() {
 function headers() {
   return {
     Authorization: `Bearer ${apiKey()}`,
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
+    "User-Agent": "mail-admin/1.0"
   };
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function parseResponse(response: Response) {
@@ -21,20 +26,29 @@ async function parseResponse(response: Response) {
       : typeof body?.error?.message === "string"
         ? body.error.message
         : `Resend request failed (${response.status})`;
-    const error = new Error(message) as Error & { status?: number; body?: unknown };
+    const error = new Error(message) as Error & { status?: number; body?: unknown; retryAfter?: number };
     error.status = response.status;
     error.body = body;
+    const retryAfter = Number(response.headers.get("retry-after") ?? "0");
+    if (Number.isFinite(retryAfter) && retryAfter > 0) error.retryAfter = retryAfter;
     throw error;
   }
   return body;
 }
 
-async function request(path: string, init: RequestInit = {}) {
+async function request(path: string, init: RequestInit = {}, attempt = 0): Promise<any> {
   const response = await fetch(`${RESEND_API}${path}`, {
     ...init,
     headers: { ...headers(), ...(init.headers ?? {}) },
     cache: "no-store"
   });
+
+  if (response.status === 429 && attempt < 3) {
+    const retryAfter = Number(response.headers.get("retry-after") ?? "1");
+    await sleep(Math.max(250, Math.min(retryAfter * 1000, 5000)));
+    return request(path, init, attempt + 1);
+  }
+
   return parseResponse(response);
 }
 
@@ -46,6 +60,9 @@ export function buildBroadcastFrom(overrideName?: string | null) {
 }
 
 const REQUIRED_PROPERTIES = [
+  { key: "mail_full_name", fallback_value: "" },
+  { key: "mail_first_name", fallback_value: "" },
+  { key: "mail_last_name", fallback_value: "" },
   { key: "mail_tracking_token", fallback_value: "" },
   { key: "mail_country", fallback_value: "" },
   { key: "mail_user_id", fallback_value: "" },
@@ -68,6 +85,7 @@ export async function ensureBroadcastContactProperties() {
         fallback_value: property.fallback_value
       })
     });
+    await sleep(220);
   }
 }
 
@@ -82,6 +100,7 @@ export async function createBroadcastSegment(name: string) {
 
 type SyncContactInput = {
   email: string;
+  fullName: string;
   firstName: string;
   lastName: string;
   trackingToken: string;
@@ -93,6 +112,9 @@ type SyncContactInput = {
 
 function properties(input: SyncContactInput) {
   return {
+    mail_full_name: input.fullName,
+    mail_first_name: input.firstName,
+    mail_last_name: input.lastName,
     mail_tracking_token: input.trackingToken,
     mail_country: input.country,
     mail_user_id: input.userId,
@@ -134,11 +156,7 @@ export async function syncContactToSegment(input: SyncContactInput) {
 
   await request(`/contacts/${encodedEmail}`, {
     method: "PATCH",
-    body: JSON.stringify({
-      first_name: input.firstName,
-      last_name: input.lastName,
-      properties: properties(input)
-    })
+    body: JSON.stringify({ properties: properties(input) })
   });
 
   await request(`/contacts/${encodedEmail}/segments/${encodeURIComponent(input.segmentId)}`, {
@@ -153,21 +171,25 @@ export async function createAndSendBroadcast(input: {
   segmentId: string;
   name: string;
   fromName?: string | null;
+  replyTo?: string | null;
   subject: string;
   html: string;
   text: string;
 }) {
+  const payload: Record<string, unknown> = {
+    segment_id: input.segmentId,
+    from: buildBroadcastFrom(input.fromName),
+    name: input.name.slice(0, 160),
+    subject: input.subject,
+    html: input.html,
+    text: input.text,
+    send: true
+  };
+  if (input.replyTo) payload.reply_to = input.replyTo;
+
   const result = await request("/broadcasts", {
     method: "POST",
-    body: JSON.stringify({
-      segment_id: input.segmentId,
-      from: buildBroadcastFrom(input.fromName),
-      name: input.name.slice(0, 160),
-      subject: input.subject,
-      html: input.html,
-      text: input.text,
-      send: true
-    })
+    body: JSON.stringify(payload)
   }) as { id?: string };
 
   if (!result.id) throw new Error("Resend did not return a Broadcast ID");
