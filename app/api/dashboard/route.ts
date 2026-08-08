@@ -28,7 +28,7 @@ export async function GET() {
       supabase.from("contacts").select("id", { count: "exact", head: true }),
       supabase.from("campaign_recipients").select("id", { count: "exact", head: true }).not("delivered_at", "is", null),
       supabase.from("sessions").select("id", { count: "exact", head: true }).not("recipient_id", "is", null),
-      supabase.from("events").select("contact_id").eq("event_type", "click").eq("is_bot", false).not("contact_id", "is", null).limit(10000),
+      supabase.from("events").select("contact_id").eq("event_type", "email_link_click").eq("is_bot", false).not("contact_id", "is", null).limit(10000),
       supabase.from("campaigns").select("id,name,status,created_at").order("created_at", { ascending: false }).limit(8),
       supabase.from("contacts").select("id,username,email,country_code,status,created_at").order("created_at", { ascending: false }).limit(8),
       supabase.from("events").select("id,event_type,occurred_at,is_bot,country_code,region,page_url,contact_id,campaign_id").order("occurred_at", { ascending: false }).limit(20)
