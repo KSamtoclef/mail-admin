@@ -13,7 +13,35 @@ const eventSchema = z.object({
   metadata: z.record(z.unknown()).optional().default({})
 });
 
+function corsHeaders(request: NextRequest) {
+  const origin = request.headers.get("origin");
+  const allowedOrigins = (process.env.TRACKING_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  const allowOrigin = origin && allowedOrigins.includes(origin) ? origin : "null";
+
+  return {
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+    "Vary": "Origin"
+  };
+}
+
+export async function OPTIONS(request: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(request) });
+}
+
 export async function POST(request: NextRequest) {
+  const headers = corsHeaders(request);
+
+  if (headers["Access-Control-Allow-Origin"] === "null" && request.headers.get("origin")) {
+    return NextResponse.json({ ok: false, error: "Origin not allowed" }, { status: 403, headers });
+  }
+
   try {
     const payload = eventSchema.parse(await request.json());
     const supabase = getSupabaseAdmin();
@@ -33,15 +61,15 @@ export async function POST(request: NextRequest) {
     });
 
     if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500, headers });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true }, { headers });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ ok: false, error: "Invalid event payload", issues: error.issues }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Invalid event payload", issues: error.issues }, { status: 400, headers });
     }
 
-    return NextResponse.json({ ok: false, error: "Unable to record event" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: "Unable to record event" }, { status: 500, headers });
   }
 }
