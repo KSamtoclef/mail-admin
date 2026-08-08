@@ -140,10 +140,79 @@ begin
 end;
 $$;
 
+create or replace function mail_ensure_broadcast_wave_quota(target_wave uuid)
+returns table (
+  ready boolean,
+  remaining_today bigint,
+  timezone text,
+  sending_paused boolean
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  s send_settings%rowtype;
+  w campaign_broadcast_waves%rowtype;
+  local_day date;
+  current_reserved integer;
+  available integer;
+begin
+  select * into s from send_settings where id = 1 for update;
+  if not found then
+    raise exception 'send settings are not configured';
+  end if;
+
+  select * into w from campaign_broadcast_waves where id = target_wave for update;
+  if not found then
+    raise exception 'broadcast wave not found';
+  end if;
+
+  local_day := (now() at time zone s.timezone)::date;
+
+  insert into send_daily_counters(day_key, timezone, reserved_count)
+  values (local_day, s.timezone, 0)
+  on conflict (day_key, timezone) do nothing;
+
+  select reserved_count into current_reserved
+  from send_daily_counters
+  where day_key = local_day and timezone = s.timezone
+  for update;
+
+  if s.sending_paused then
+    return query select false, greatest(s.daily_send_limit - current_reserved, 0)::bigint, s.timezone, true;
+    return;
+  end if;
+
+  if w.day_key = local_day then
+    return query select true, greatest(s.daily_send_limit - current_reserved, 0)::bigint, s.timezone, false;
+    return;
+  end if;
+
+  available := greatest(s.daily_send_limit - current_reserved, 0);
+  if available < w.recipient_count then
+    return query select false, available::bigint, s.timezone, false;
+    return;
+  end if;
+
+  update send_daily_counters
+  set reserved_count = reserved_count + w.recipient_count,
+      updated_at = now()
+  where day_key = local_day and timezone = s.timezone;
+
+  update campaign_broadcast_waves
+  set day_key = local_day
+  where id = target_wave;
+
+  return query select true, (available - w.recipient_count)::bigint, s.timezone, false;
+end;
+$$;
+
 create or replace function mail_broadcast_transport_ready()
 returns table (
   reserve_function boolean,
-  release_function boolean
+  release_function boolean,
+  ensure_wave_function boolean
 )
 language sql
 stable
@@ -152,5 +221,6 @@ set search_path = public
 as $$
   select
     to_regprocedure('public.mail_reserve_broadcast_quota(integer)') is not null,
-    to_regprocedure('public.mail_release_send_quota(integer)') is not null;
+    to_regprocedure('public.mail_release_send_quota(integer)') is not null,
+    to_regprocedure('public.mail_ensure_broadcast_wave_quota(uuid)') is not null;
 $$;
