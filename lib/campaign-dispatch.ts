@@ -269,6 +269,7 @@ export async function processCampaignBatch(campaignId: string) {
         subject: renderedSubject,
         text: renderedText,
         html: textToHtml(renderedText),
+        fromName: campaign.from_name,
         replyTo: campaign.reply_to,
         headers: {
           "List-Unsubscribe": `<${oneClick}>`,
