@@ -197,6 +197,19 @@ export async function createBroadcastDraft(input: BroadcastContentInput) {
   return result.id;
 }
 
+export async function getBroadcastStatus(broadcastId: string) {
+  const result = await request(`/broadcasts/${encodeURIComponent(broadcastId)}`, {
+    method: "GET"
+  }) as { id?: string; status?: string; sent_at?: string | null; scheduled_at?: string | null };
+
+  return {
+    id: result.id ?? broadcastId,
+    status: result.status ?? "unknown",
+    sentAt: result.sent_at ?? null,
+    scheduledAt: result.scheduled_at ?? null
+  };
+}
+
 export async function sendBroadcastDraft(broadcastId: string) {
   const result = await request(`/broadcasts/${encodeURIComponent(broadcastId)}/send`, {
     method: "POST",
