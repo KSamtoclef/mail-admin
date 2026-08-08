@@ -53,6 +53,10 @@ function endpointFromEnv() {
   return url.toString();
 }
 
+export function getCookiesPilotBrowserEndpoint() {
+  return endpointFromEnv();
+}
+
 function endpointLabel(endpoint: string | null) {
   if (!endpoint) return null;
   try {
