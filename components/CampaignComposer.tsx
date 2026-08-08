@@ -14,7 +14,7 @@ const previewValues = {
   session_id: "session_67890",
   campaign_name: "Campaign preview",
   tracked_link: "https://mail-admin.example/c/example/link",
-  unsubscribe_url: "https://mail-admin.example/unsubscribe/example"
+  unsubscribe_url: "https://mail-admin.example/u/example"
 };
 
 export default function CampaignComposer({ onSaved }: { onSaved?: () => void | Promise<void> }) {
@@ -23,6 +23,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
   const [fromName, setFromName] = useState("");
   const [replyTo, setReplyTo] = useState("");
   const [body, setBody] = useState("");
+  const [primaryLinkUrl, setPrimaryLinkUrl] = useState("");
   const [trackingMode, setTrackingMode] = useState("clicks_and_site");
   const [scheduledAt, setScheduledAt] = useState("");
   const [activeTarget, setActiveTarget] = useState<"subject" | "body">("body");
@@ -34,6 +35,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
 
   const previewSubject = useMemo(() => renderTemplate(subject || "Subject preview", previewValues), [subject]);
   const previewBody = useMemo(() => renderTemplate(body || "Your message will appear here.", previewValues), [body]);
+  const usesTrackedLink = subject.includes("{{tracked_link}}") || body.includes("{{tracked_link}}");
 
   function insertAtCursor(value: string, token: string, start: number | null, end: number | null) {
     const from = start ?? value.length;
@@ -71,6 +73,10 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
       setMessage("Campaign name, subject and message are required.");
       return;
     }
+    if (usesTrackedLink && !primaryLinkUrl.trim()) {
+      setMessage("Add the destination URL used by {{tracked_link}}.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -83,6 +89,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
           from_name: fromName || null,
           reply_to: replyTo || null,
           text_body: body,
+          primary_link_url: primaryLinkUrl || null,
           tracking_mode: trackingMode,
           scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null
         })
@@ -114,6 +121,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
           </div>
           <div className="formRow"><div><label>Subject</label><input ref={subjectRef} className="input" value={subject} onFocus={() => setActiveTarget("subject")} onChange={(e) => setSubject(e.target.value)} placeholder="Hey {{first_name}}, we have an update" /></div></div>
           <div className="formRow"><div><label>Message</label><textarea ref={bodyRef} className="textarea" value={body} onFocus={() => setActiveTarget("body")} onChange={(e) => setBody(e.target.value)} placeholder={'Hi {{first_name}},\n\nVisit your dashboard: {{tracked_link}}\n\nUnsubscribe: {{unsubscribe_url}}'} /></div></div>
+          <div className="formRow"><div><label>Tracked destination URL</label><input className="input" type="url" value={primaryLinkUrl} onChange={(e) => setPrimaryLinkUrl(e.target.value)} placeholder="https://www.earn-chat.com/" /><p className="formHelp">Required only when you use <code>{"{{tracked_link}}"}</code>. Every recipient gets a unique tracked redirect to this URL.</p></div></div>
           <div className="formRow formRowTwo">
             <div><label>Tracking</label><select className="select" value={trackingMode} onChange={(e) => setTrackingMode(e.target.value)}><option value="clicks_and_site">Clicks + site events</option><option value="clicks_only">Clicks only</option><option value="delivery_only">Delivery only</option></select></div>
             <div><label>Schedule</label><input className="input" type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
