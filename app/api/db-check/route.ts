@@ -45,18 +45,15 @@ export async function GET() {
       };
     }));
 
-    const [usageResult, reserveCheck, releaseCheck] = await Promise.all([
+    const [usageResult, transportResult] = await Promise.all([
       supabase.rpc("mail_daily_send_usage"),
-      supabase.rpc("mail_reserve_broadcast_quota", { requested: 1 }),
-      Promise.resolve(null)
+      supabase.rpc("mail_broadcast_transport_ready")
     ]);
 
-    let releaseResult: { error?: { message?: string; code?: string } | null } | null = releaseCheck;
-    if (!reserveCheck.error && Number(reserveCheck.data?.[0]?.allowed ?? 0) > 0) {
-      releaseResult = await supabase.rpc("mail_release_send_quota", { release_count: 1 });
-    } else if (!reserveCheck.error) {
-      releaseResult = { error: null };
-    }
+    const transportRow = transportResult.data?.[0];
+    const transportHealthy = !transportResult.error &&
+      Boolean(transportRow?.reserve_function) &&
+      Boolean(transportRow?.release_function);
 
     const results: CheckResult[] = [
       ...tableResults,
@@ -67,16 +64,10 @@ export async function GET() {
         code: usageResult.error?.code ?? null
       },
       {
-        name: "mail_reserve_broadcast_quota",
-        ok: !reserveCheck.error,
-        error: reserveCheck.error?.message ?? null,
-        code: reserveCheck.error?.code ?? null
-      },
-      {
-        name: "mail_release_send_quota",
-        ok: !releaseResult?.error,
-        error: releaseResult?.error?.message ?? null,
-        code: releaseResult?.error?.code ?? null
+        name: "broadcast_quota_functions",
+        ok: transportHealthy,
+        error: transportResult.error?.message ?? (transportHealthy ? null : "Broadcast quota functions are missing"),
+        code: transportResult.error?.code ?? null
       }
     ];
 
