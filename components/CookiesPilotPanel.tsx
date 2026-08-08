@@ -23,6 +23,7 @@ type CookiesPilotStatus = {
   emailConfigured: boolean;
   endpointLabel: string | null;
   endpointError: string | null;
+  browserEndpoint: string | null;
   auditReady: boolean;
   latest: LatestCheck | null;
 };
@@ -36,6 +37,10 @@ function StatusLine({ label, ready, text }: { label: string; ready: boolean; tex
   );
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export default function CookiesPilotPanel() {
   const [status, setStatus] = useState<CookiesPilotStatus | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,18 +48,44 @@ export default function CookiesPilotPanel() {
 
   async function load() {
     const response = await fetch("/api/cookies-pilot/status", { cache: "no-store" });
-    if (!response.ok) return;
+    if (!response.ok) return null;
     const result = await response.json();
     setStatus(result);
+    return result as CookiesPilotStatus;
   }
 
   useEffect(() => { load(); }, []);
+
+  async function browserHandshake(endpoint: string | null | undefined) {
+    if (!endpoint) return;
+
+    try {
+      await fetch(endpoint, {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "follow"
+      });
+    } catch {
+      // The request still reaches Cloud365 even when the browser blocks reading
+      // the response because of CORS. The server-side verification below is authoritative.
+    }
+
+    await sleep(3000);
+  }
 
   async function testConnection() {
     setBusy(true);
     setMessage("");
     try {
-      const response = await fetch("/api/cookies-pilot/test", { method: "POST" });
+      const current = status ?? await load();
+      await browserHandshake(current?.browserEndpoint);
+
+      const response = await fetch("/api/cookies-pilot/test", {
+        method: "POST",
+        cache: "no-store"
+      });
       const result = await response.json();
       if (response.ok) {
         setMessage(result.skipped
