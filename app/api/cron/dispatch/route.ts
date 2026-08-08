@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { processCampaignBroadcastWave } from "@/lib/resend-broadcast-dispatch";
+import { ensureCookiesPilotBeforeCampaignRun } from "@/lib/cookies-pilot";
 
 export const dynamic = "force-dynamic";
 
@@ -31,8 +32,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, state: "idle" }, { headers: { "Cache-Control": "no-store" } });
     }
 
+    const cookiesPilot = await ensureCookiesPilotBeforeCampaignRun(campaignResult.data.id);
     const result = await processCampaignBroadcastWave(campaignResult.data.id);
-    return NextResponse.json({ ok: true, campaignId: campaignResult.data.id, result }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({
+      ok: true,
+      campaignId: campaignResult.data.id,
+      cookiesPilot,
+      result
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({
       ok: false,
