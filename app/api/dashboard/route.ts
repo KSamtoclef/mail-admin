@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { trackingIsConfigured } from "@/lib/tracking-security";
 
 function hasSupabaseConfig() {
   return Boolean(
@@ -11,6 +12,7 @@ function hasSupabaseConfig() {
 const emptyMetrics = {
   contacts: 0,
   activeContacts: 0,
+  missingUsernames: 0,
   delivered: 0,
   uniqueClickers: 0,
   humanClicks: 0,
@@ -20,9 +22,11 @@ const emptyMetrics = {
   totalEvents: 0
 };
 
+const noStoreHeaders = { "Cache-Control": "no-store" };
+
 export async function GET() {
   const providerConfigured = Boolean(process.env.EMAIL_PROVIDER && process.env.DEFAULT_FROM_EMAIL);
-  const trackingConfigured = Boolean(process.env.TRACKING_BASE_URL && process.env.TRACKING_ALLOWED_ORIGINS);
+  const trackingConfigured = trackingIsConfigured();
   const authConfigured = Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET);
 
   if (!hasSupabaseConfig()) {
@@ -36,7 +40,7 @@ export async function GET() {
       contacts: [],
       imports: [],
       events: []
-    });
+    }, { headers: noStoreHeaders });
   }
 
   try {
@@ -45,6 +49,7 @@ export async function GET() {
     const [
       contactsCount,
       activeContactsCount,
+      missingUsernamesCount,
       deliveredCount,
       attributedSessionsCount,
       anonymousSessionsCount,
@@ -59,6 +64,7 @@ export async function GET() {
     ] = await Promise.all([
       supabase.from("contacts").select("id", { count: "exact", head: true }),
       supabase.from("contacts").select("id", { count: "exact", head: true }).eq("status", "active"),
+      supabase.from("contacts").select("id", { count: "exact", head: true }).is("username", null),
       supabase.from("campaign_recipients").select("id", { count: "exact", head: true }).not("delivered_at", "is", null),
       supabase.from("sessions").select("id", { count: "exact", head: true }).not("recipient_id", "is", null),
       supabase.from("sessions").select("id", { count: "exact", head: true }).is("recipient_id", null),
@@ -71,7 +77,7 @@ export async function GET() {
       supabase.from("contact_imports").select("id,filename,total_rows,valid_rows,unique_rows,added_rows,updated_rows,duplicate_rows,invalid_rows,created_at").order("created_at", { ascending: false }).limit(8),
       supabase
         .from("events")
-        .select("id,event_type,occurred_at,is_bot,bot_reason,country_code,region,page_url,device_type,contact_id,campaign_id,link_id,contact:contacts(username,email),campaign:campaigns(name),link:tracked_links(label,destination_url)")
+        .select("id,event_type,occurred_at,is_bot,bot_reason,country_code,region,page_url,device_type,browser,contact_id,campaign_id,link_id,contact:contacts(username,email),campaign:campaigns(name),link:tracked_links(label,destination_url)")
         .order("occurred_at", { ascending: false })
         .limit(50)
     ]);
@@ -79,6 +85,7 @@ export async function GET() {
     const errors = [
       contactsCount.error,
       activeContactsCount.error,
+      missingUsernamesCount.error,
       deliveredCount.error,
       attributedSessionsCount.error,
       anonymousSessionsCount.error,
@@ -104,7 +111,7 @@ export async function GET() {
         imports: [],
         events: [],
         error: errors[0]?.message ?? "Unable to read dashboard data"
-      }, { status: 500 });
+      }, { status: 500, headers: noStoreHeaders });
     }
 
     const uniqueClickers = new Set((clickRows.data ?? []).map((row) => row.contact_id).filter(Boolean)).size;
@@ -117,6 +124,7 @@ export async function GET() {
       metrics: {
         contacts: contactsCount.count ?? 0,
         activeContacts: activeContactsCount.count ?? 0,
+        missingUsernames: missingUsernamesCount.count ?? 0,
         delivered: deliveredCount.count ?? 0,
         uniqueClickers,
         humanClicks: humanClicksCount.count ?? 0,
@@ -129,7 +137,7 @@ export async function GET() {
       contacts: contacts.data ?? [],
       imports: imports.data ?? [],
       events: events.data ?? []
-    });
+    }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json({
       connected: false,
@@ -142,6 +150,6 @@ export async function GET() {
       imports: [],
       events: [],
       error: error instanceof Error ? error.message : "Unable to load dashboard"
-    }, { status: 500 });
+    }, { status: 500, headers: noStoreHeaders });
   }
 }
