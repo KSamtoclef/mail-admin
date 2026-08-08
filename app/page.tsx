@@ -10,9 +10,10 @@ import {
   MousePointerClick,
   Send,
   Settings,
-  ShieldCheck
+  ShieldCheck,
+  Upload
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type View = "overview" | "contacts" | "campaigns" | "composer" | "tracking" | "events" | "settings";
 
@@ -38,6 +39,42 @@ type DashboardEvent = {
   link?: EventLink | EventLink[] | null;
 };
 
+type ContactRow = {
+  id: string;
+  external_user_id: string | null;
+  external_session_id: string | null;
+  username: string | null;
+  email: string;
+  country_code: string | null;
+  status: string;
+  created_at: string;
+};
+
+type ImportAudit = {
+  id: string;
+  filename: string;
+  total_rows: number;
+  valid_rows: number;
+  unique_rows: number;
+  added_rows: number;
+  updated_rows: number;
+  duplicate_rows: number;
+  invalid_rows: number;
+  created_at: string;
+};
+
+type ImportSummary = {
+  filename: string;
+  totalRows: number;
+  validRows: number;
+  uniqueRows: number;
+  addedRows: number;
+  updatedRows: number;
+  duplicateRows: number;
+  invalidRows: number;
+  totalContactsAfterImport: number;
+};
+
 type DashboardData = {
   connected: boolean;
   authConfigured?: boolean;
@@ -56,7 +93,8 @@ type DashboardData = {
     totalEvents: number;
   };
   campaigns: Array<{ id: string; name: string; status: string; created_at: string; scheduled_at?: string | null }>;
-  contacts: Array<{ id: string; username: string | null; email: string; country_code: string | null; status: string; created_at: string }>;
+  contacts: ContactRow[];
+  imports: ImportAudit[];
   events: DashboardEvent[];
 };
 
@@ -78,6 +116,7 @@ const emptyData: DashboardData = {
   },
   campaigns: [],
   contacts: [],
+  imports: [],
   events: []
 };
 
@@ -119,6 +158,12 @@ export default function Home() {
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [message, setMessage] = useState("");
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState("");
+  const [importResult, setImportResult] = useState<ImportSummary | null>(null);
+
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [fromName, setFromName] = useState("");
@@ -138,6 +183,7 @@ export default function Home() {
         metrics: { ...emptyData.metrics, ...(payload.metrics ?? {}) },
         campaigns: payload.campaigns ?? [],
         contacts: payload.contacts ?? [],
+        imports: payload.imports ?? [],
         events: payload.events ?? []
       });
       setLastUpdated(new Date());
@@ -157,6 +203,37 @@ export default function Home() {
   const clickEvents = useMemo(() => data.events.filter((event) => event.event_type === "email_link_click"), [data.events]);
   const previewSubject = useMemo(() => (subject || "Your subject will appear here").replaceAll("{{first_name}}", "Recipient"), [subject]);
   const previewBody = useMemo(() => (body || "Your message preview will appear here.").replaceAll("{{first_name}}", "Recipient").replaceAll("{{tracked_link}}", "[Tracked link]"), [body]);
+
+  async function importContacts() {
+    if (!importFile || importing) return;
+
+    setImporting(true);
+    setImportMessage("");
+    setImportResult(null);
+
+    try {
+      const form = new FormData();
+      form.append("file", importFile);
+
+      const response = await fetch("/api/contacts/import", { method: "POST", body: form });
+      const result = await response.json();
+
+      if (!response.ok) {
+        setImportMessage(result.error ?? "Unable to import contacts.");
+        return;
+      }
+
+      setImportResult(result.summary as ImportSummary);
+      setImportMessage("Import completed successfully.");
+      setImportFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await refresh(false);
+    } catch {
+      setImportMessage("The import request failed before completion.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function saveCampaign() {
     setMessage("");
@@ -205,7 +282,7 @@ export default function Home() {
       <main className="main">
         {!loading && !data.connected && (
           <section className="card" style={{ marginBottom: 16, borderColor: "#6b4f1d" }}>
-            <div className="event"><Cable className="warn" size={18} /><div><div className="eventTitle">Supabase is not connected yet</div><div className="eventMeta">No fake data is being shown. Once the database credentials and schema are added, this dashboard switches to live contacts, campaigns, sessions and events automatically.</div></div></div>
+            <div className="event"><Cable className="warn" size={18} /><div><div className="eventTitle">Supabase is not fully ready</div><div className="eventMeta">No fake data is shown. If your health check says Supabase is configured, run the latest SQL migration in Supabase so the dashboard can read every required table and column.</div></div></div>
           </section>
         )}
 
@@ -227,7 +304,7 @@ export default function Home() {
             <section className="card">
               <h3 className="sectionTitle">System readiness</h3>
               <StatusRow icon={<LockKeyhole className={data.authConfigured ? "good" : "warn"} size={18} />} title="Admin protection" ready={Boolean(data.authConfigured)} readyText="Password protection configured" waitingText="Add ADMIN_PASSWORD + ADMIN_SESSION_SECRET" />
-              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase" ready={data.connected} readyText="Database connected" waitingText="Waiting for Supabase credentials + schema" />
+              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase" ready={data.connected} readyText="Database connected and readable" waitingText="Waiting for credentials/schema migration" />
               <StatusRow icon={<MousePointerClick className={data.trackingConfigured ? "good" : "warn"} size={18} />} title="Website tracking" ready={Boolean(data.trackingConfigured)} readyText="Tracking URL and origins configured" waitingText="Add tracking URL and allowed website origin" />
               <StatusRow icon={<Cable className={data.providerConfigured ? "good" : "warn"} size={18} />} title="Email provider" ready={Boolean(data.providerConfigured)} readyText="Base email provider settings detected" waitingText="Connect your reseller/email API later" />
             </section>
@@ -235,14 +312,65 @@ export default function Home() {
         </>}
 
         {view === "contacts" && <>
-          <Header title="Contacts" subtitle="Real contacts from your connected database only." />
+          <Header
+            title="Contacts"
+            subtitle="Import, deduplicate and audit your real mailing list."
+            actions={<>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                hidden
+                onChange={(event) => {
+                  setImportFile(event.target.files?.[0] ?? null);
+                  setImportMessage("");
+                  setImportResult(null);
+                }}
+              />
+              <button className="button" onClick={() => fileInputRef.current?.click()}><Upload size={16} />{importFile ? "Change CSV" : "Choose CSV"}</button>
+              <button className="button buttonPrimary" disabled={!importFile || importing || !data.connected} onClick={importContacts}>{importing ? "Importing…" : "Import Contacts"}</button>
+            </>}
+          />
+
           <div className="grid4" style={{ marginBottom: 12 }}>
             <Metric label="All Contacts" value={data.metrics.contacts} />
             <Metric label="Active" value={data.metrics.activeContacts} />
             <Metric label="Recent Rows" value={data.contacts.length} hint="latest loaded" />
             <Metric label="Database" value={data.connected ? "Connected" : "Offline"} />
           </div>
-          <section className="card">{data.contacts.length ? <table><thead><tr><th>User</th><th>Email</th><th>Country</th><th>Status</th><th>Added</th></tr></thead><tbody>{data.contacts.map((row) => <tr key={row.id}><td>{row.username || "—"}</td><td>{row.email}</td><td>{row.country_code || "—"}</td><td><span className="badge">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString()}</td></tr>)}</tbody></table> : <Empty>No contacts yet. After Supabase is connected, import your cleaned contact CSV.</Empty>}</section>
+
+          <section className="card" style={{ marginBottom: 12 }}>
+            <h3 className="sectionTitle">CSV import</h3>
+            <p className="note">Expected columns: <strong>user_id, session_id, username, email</strong>. Emails are compared case-insensitively. Duplicate rows in the file are collapsed before the database write, and an existing email is updated instead of duplicated.</p>
+            <div className="event">
+              <Upload size={18} className={importFile ? "good" : "warn"} />
+              <div><div className="eventTitle">{importFile ? importFile.name : "No CSV selected"}</div><div className="eventMeta">{importFile ? `${(importFile.size / 1024 / 1024).toFixed(2)} MB · ready to import` : "Choose your cleaned master CSV above."}</div></div>
+            </div>
+            {importMessage ? <p className={`note ${importResult ? "good" : "danger"}`}>{importMessage}</p> : null}
+          </section>
+
+          {importResult ? <>
+            <div className="grid4" style={{ marginBottom: 12 }}>
+              <Metric label="Rows in CSV" value={importResult.totalRows} />
+              <Metric label="Unique Valid" value={importResult.uniqueRows} />
+              <Metric label="Newly Added" value={importResult.addedRows} />
+              <Metric label="Already Existing" value={importResult.updatedRows} />
+            </div>
+            <section className="card" style={{ marginBottom: 12 }}>
+              <div className="eventTitle">Import verified</div>
+              <div className="eventMeta">{importResult.duplicateRows.toLocaleString()} duplicate row(s) inside the CSV were collapsed · {importResult.invalidRows.toLocaleString()} invalid/missing row(s) were rejected · database now contains {importResult.totalContactsAfterImport.toLocaleString()} contact(s).</div>
+            </section>
+          </> : null}
+
+          <section className="card" style={{ marginBottom: 12 }}>
+            <h3 className="sectionTitle">Recent contacts</h3>
+            {data.contacts.length ? <table><thead><tr><th>User ID</th><th>Session ID</th><th>Username</th><th>Email</th><th>Status</th></tr></thead><tbody>{data.contacts.map((row) => <tr key={row.id}><td>{row.external_user_id || "—"}</td><td>{row.external_session_id || "—"}</td><td>{row.username || "—"}</td><td>{row.email}</td><td><span className="badge">{row.status}</span></td></tr>)}</tbody></table> : <Empty>No contacts yet. Choose your cleaned master CSV and import it above.</Empty>}
+          </section>
+
+          <section className="card">
+            <h3 className="sectionTitle">Import history</h3>
+            {data.imports.length ? <table><thead><tr><th>File</th><th>Added</th><th>Existing</th><th>CSV duplicates</th><th>Rejected</th><th>Time</th></tr></thead><tbody>{data.imports.map((row) => <tr key={row.id}><td>{row.filename}</td><td>{row.added_rows.toLocaleString()}</td><td>{row.updated_rows.toLocaleString()}</td><td>{row.duplicate_rows.toLocaleString()}</td><td>{row.invalid_rows.toLocaleString()}</td><td>{new Date(row.created_at).toLocaleString()}</td></tr>)}</tbody></table> : <Empty>No imports recorded yet.</Empty>}
+          </section>
         </>}
 
         {view === "campaigns" && <>
@@ -305,11 +433,11 @@ export default function Home() {
           <div className="twoCol">
             <section className="card"><h3 className="sectionTitle">Required connections</h3>
               <StatusRow icon={<LockKeyhole className={data.authConfigured ? "good" : "warn"} size={18} />} title="Admin protection" ready={Boolean(data.authConfigured)} readyText="Configured" waitingText="Add ADMIN_PASSWORD and ADMIN_SESSION_SECRET in Vercel" />
-              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase database" ready={data.connected} readyText="Connected and readable" waitingText="Add Supabase environment variables, then run the schema" />
+              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase database" ready={data.connected} readyText="Connected and readable" waitingText="Add credentials and run the latest schema/migration" />
               <StatusRow icon={<MousePointerClick className={data.trackingConfigured ? "good" : "warn"} size={18} />} title="Website tracker" ready={Boolean(data.trackingConfigured)} readyText="Base URL and allowed origin configured" waitingText="Add TRACKING_BASE_URL and TRACKING_ALLOWED_ORIGINS" />
               <StatusRow icon={<Cable className={data.providerConfigured ? "good" : "warn"} size={18} />} title="Email API" ready={Boolean(data.providerConfigured)} readyText="Base provider configuration detected" waitingText="Connect your email/reseller API when ready" />
             </section>
-            <section className="card"><h3 className="sectionTitle">What is already built</h3><p className="note">Admin login, database-backed campaigns, contact views, unique recipient click redirects, human-vs-scanner click classification, attributed email sessions, anonymous website sessions, page/action events, approximate country/region metadata, CORS allow-listing and live dashboard polling are already in the codebase.</p><p className="note">Precise GPS is not collected automatically. Exact location requires explicit browser permission. Do not send passwords, payment details or private form contents as tracking metadata.</p></section>
+            <section className="card"><h3 className="sectionTitle">What is already built</h3><p className="note">Admin login, database-backed campaigns, reusable contact imports with audit history, unique recipient click redirects, human-vs-scanner click classification, attributed email sessions, anonymous website sessions, page/action events, approximate country/region metadata, CORS allow-listing and live dashboard polling are already in the codebase.</p><p className="note">Precise GPS is not collected automatically. Exact location requires explicit browser permission. Do not send passwords, payment details or private form contents as tracking metadata.</p></section>
           </div>
         </>}
       </main>
