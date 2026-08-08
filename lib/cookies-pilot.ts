@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 const PROCESSING_WINDOW_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;
 const MAX_RESPONSE_PREVIEW = 1000;
+const CAMPAIGN_CHECK_REUSE_MS = 15 * 60 * 1000;
 
 export type CookiesPilotCheckPurpose = "test" | "pre_send";
 
@@ -209,6 +210,42 @@ export async function runCookiesPilotCheck(input: {
 }) {
   const result = await callCookiesPilotEndpoint();
   await recordCheck({ ...input, result });
+  return result;
+}
+
+export async function ensureCookiesPilotBeforeCampaignRun(campaignId: string) {
+  const status = getCookiesPilotStatus();
+  if (!status.enabled) return { ok: true, skipped: true };
+  if (!status.endpointConfigured) {
+    throw new Error(status.endpointError ?? "Cookies Pilot is enabled but the CURL endpoint is not configured");
+  }
+
+  const supabase = getSupabaseAdmin() as any;
+  const cutoff = new Date(Date.now() - CAMPAIGN_CHECK_REUSE_MS).toISOString();
+  const previous = await supabase
+    .from("cookie_pilot_checks")
+    .select("id,ok,skipped,http_status,duration_ms,response_preview,error,created_at")
+    .eq("purpose", "pre_send")
+    .eq("campaign_id", campaignId)
+    .eq("ok", true)
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!previous.error && previous.data?.ok) {
+    return { ok: true, skipped: Boolean(previous.data.skipped), reused: true };
+  }
+
+  const result = await runCookiesPilotCheck({
+    purpose: "pre_send",
+    campaignId
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error ?? "Cookies Pilot CURL pre-send check failed");
+  }
+
   return result;
 }
 
