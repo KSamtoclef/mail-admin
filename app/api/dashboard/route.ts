@@ -34,6 +34,7 @@ export async function GET() {
       metrics: emptyMetrics,
       campaigns: [],
       contacts: [],
+      imports: [],
       events: []
     });
   }
@@ -53,6 +54,7 @@ export async function GET() {
       clickRows,
       campaigns,
       contacts,
+      imports,
       events
     ] = await Promise.all([
       supabase.from("contacts").select("id", { count: "exact", head: true }),
@@ -65,7 +67,8 @@ export async function GET() {
       supabase.from("events").select("id", { count: "exact", head: true }),
       supabase.from("events").select("contact_id").eq("event_type", "email_link_click").eq("is_bot", false).not("contact_id", "is", null).limit(50000),
       supabase.from("campaigns").select("id,name,status,created_at,scheduled_at").order("created_at", { ascending: false }).limit(12),
-      supabase.from("contacts").select("id,username,email,country_code,status,created_at").order("created_at", { ascending: false }).limit(12),
+      supabase.from("contacts").select("id,external_user_id,external_session_id,username,email,country_code,status,created_at").order("created_at", { ascending: false }).limit(20),
+      supabase.from("contact_imports").select("id,filename,total_rows,valid_rows,unique_rows,added_rows,updated_rows,duplicate_rows,invalid_rows,created_at").order("created_at", { ascending: false }).limit(8),
       supabase
         .from("events")
         .select("id,event_type,occurred_at,is_bot,bot_reason,country_code,region,page_url,device_type,contact_id,campaign_id,link_id,contact:contacts(username,email),campaign:campaigns(name),link:tracked_links(label,destination_url)")
@@ -85,6 +88,7 @@ export async function GET() {
       clickRows.error,
       campaigns.error,
       contacts.error,
+      imports.error,
       events.error
     ].filter(Boolean);
 
@@ -97,6 +101,7 @@ export async function GET() {
         metrics: emptyMetrics,
         campaigns: [],
         contacts: [],
+        imports: [],
         events: [],
         error: errors[0]?.message ?? "Unable to read dashboard data"
       }, { status: 500 });
@@ -122,6 +127,7 @@ export async function GET() {
       },
       campaigns: campaigns.data ?? [],
       contacts: contacts.data ?? [],
+      imports: imports.data ?? [],
       events: events.data ?? []
     });
   } catch (error) {
@@ -133,6 +139,7 @@ export async function GET() {
       metrics: emptyMetrics,
       campaigns: [],
       contacts: [],
+      imports: [],
       events: [],
       error: error instanceof Error ? error.message : "Unable to load dashboard"
     }, { status: 500 });
