@@ -5,6 +5,7 @@ const REQUEST_TIMEOUT_MS = 10000;
 const MAX_ATTEMPTS = 3;
 const MAX_RESPONSE_PREVIEW = 1000;
 const CAMPAIGN_CHECK_REUSE_MS = 15 * 60 * 1000;
+const DEFAULT_APP_ORIGIN = "https://mail-admin-six.vercel.app";
 
 export type CookiesPilotCheckPurpose = "test" | "pre_send";
 
@@ -64,6 +65,27 @@ function endpointLabel(endpoint: string | null) {
   }
 }
 
+function cookiesPilotRequestOrigin() {
+  const explicit = process.env.COOKIE_PILOT_ORIGIN?.trim();
+  const projectProductionUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim();
+  const candidates = [
+    explicit,
+    projectProductionUrl ? `https://${projectProductionUrl.replace(/^https?:\/\//i, "")}` : null,
+    DEFAULT_APP_ORIGIN
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(candidate);
+      if (url.protocol === "https:") return url.origin;
+    } catch {
+      // Try the next configured source.
+    }
+  }
+
+  return DEFAULT_APP_ORIGIN;
+}
+
 export function getCookiesPilotStatus() {
   let endpoint: string | null = null;
   let endpointError: string | null = null;
@@ -121,6 +143,7 @@ async function callCookiesPilotEndpoint(): Promise<CookiesPilotCheckResult> {
     };
   }
 
+  const requestOrigin = cookiesPilotRequestOrigin();
   const overallStarted = Date.now();
   let lastHttpStatus: number | null = null;
   let lastResponsePreview: string | null = null;
@@ -136,6 +159,8 @@ async function callCookiesPilotEndpoint(): Promise<CookiesPilotCheckResult> {
         method: "GET",
         headers: {
           Accept: "application/json, text/plain, */*",
+          Origin: requestOrigin,
+          Referer: `${requestOrigin}/`,
           "User-Agent": "mail-admin/1.0"
         },
         redirect: "follow",
