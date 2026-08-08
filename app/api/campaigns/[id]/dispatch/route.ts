@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { processCampaignBatch, startCampaignDispatch } from "@/lib/campaign-dispatch";
+import { startCampaignDispatch } from "@/lib/campaign-dispatch";
+import { processCampaignBroadcastWave } from "@/lib/resend-broadcast-dispatch";
 
 const idSchema = z.string().uuid();
 const bodySchema = z.object({
@@ -21,7 +22,7 @@ export async function POST(
       await startCampaignDispatch(id, body.confirm_permission);
     }
 
-    const result = await processCampaignBatch(id);
+    const result = await processCampaignBroadcastWave(id);
     return NextResponse.json({ ok: true, result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof z.ZodError) {
