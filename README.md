@@ -1,80 +1,75 @@
 # Mail Admin
 
-Self-service email campaign dashboard for contact management, campaign sending, recipient-level click attribution, and website event analytics.
+Self-service email campaign dashboard for contact management, campaign creation, recipient-level click attribution, and website event analytics.
 
-## Current build
+## Current state
 
-The repository now contains a working Next.js/TypeScript dashboard shell plus the core tracking backend architecture.
+The UI contains no fake contacts, campaigns, click rows, or demo metrics. Until Supabase is connected, the dashboard intentionally shows zero values and a connection notice.
 
-### Dashboard
-- Overview metrics
-- Contacts
-- Campaigns
-- Campaign composer with dynamic tags
-- Recipient-level tracking table
-- Live website events
-- API/provider settings
+The repository includes:
+- Next.js 15 + TypeScript dashboard
+- environment-based admin login
+- live dashboard API
+- live campaign draft API
+- Supabase/PostgreSQL schema
+- unique recipient tracking redirect `/c/:token/:linkId`
+- bot/scanner flagging
+- attributed website sessions
+- public `mail-tracker.js` for the destination website
+- `/api/events` website event collector with allowed-origin checks
+- `/api/health` deployment/configuration status
+- GitHub Actions build verification
 
-### Tracking architecture
-1. A campaign creates one `campaign_recipients` row per recipient.
-2. Each recipient receives an opaque unique `tracking_token`.
-3. Email links point to `/c/:token/:linkId` on Mail Admin.
-4. The redirect endpoint records the click and separates obvious scanner/bot user agents.
-5. For likely human clicks, Mail Admin creates an attributed website session.
-6. The redirect adds an opaque `mt_sid` session value to the destination URL.
-7. `public/mail-tracker.js` captures that value on the destination website, removes it from the visible URL, and stores it in `sessionStorage`.
-8. The site tracker records page views and explicitly marked events back to `/api/events`.
+## Tracking flow
 
-This lets the dashboard reconstruct a journey such as:
+`campaign -> recipient -> unique tracked link -> click -> attributed session -> website event -> analytics`
 
-`campaign -> recipient -> click -> website session -> page view -> registration/conversion`
+A campaign recipient receives an opaque tracking token. When a tracked link is clicked, Mail Admin records the click, separates obvious scanner/bot user agents, creates an attributed session for likely human traffic, and redirects to the real destination. The destination receives an opaque `mt_sid` session value. `public/mail-tracker.js` stores that session in `sessionStorage`, removes it from the visible URL, and submits page/action events back to Mail Admin.
 
-## Technology
-- Next.js 15
-- TypeScript
-- Supabase/PostgreSQL
-- Provider-neutral email API layer (Resend first, with SES/Postmark/SendGrid possible later)
-- Vercel-compatible deployment
+## Deploy on Vercel
 
-## Quick start
+1. Import the GitHub repository `KSamtoclef/mail-admin` into Vercel.
+2. Keep the detected framework as Next.js and the root directory as `./`.
+3. Deploy once. The dashboard can deploy before Supabase/email-provider variables exist; it will show an unconnected zero-data state.
+4. Add production environment variables in Vercel Project Settings > Environment Variables.
+5. Redeploy after adding or changing environment variables.
 
-```bash
-npm install
-cp .env.example .env.local
-npm run dev
-```
-
-Open `http://localhost:3000`.
-
-## Database
-
-Run `supabase/schema.sql` in your Supabase SQL editor.
-
-The schema includes:
-- `contacts`
-- `suppression_list`
-- `campaigns`
-- `campaign_recipients`
-- `tracked_links`
-- `sessions`
-- `events`
-- `provider_webhook_events`
-
-## Environment variables
-
-Copy `.env.example` to `.env.local` and configure values in the deployment environment.
-
-Never commit real API keys or service-role keys to this repository.
-
-`TRACKING_ALLOWED_ORIGINS` is a comma-separated list of websites allowed to submit tracking events. Example:
+### Minimum variables for a protected first deployment
 
 ```env
-TRACKING_ALLOWED_ORIGINS=https://example.com,https://www.example.com
+ADMIN_PASSWORD=choose-a-private-admin-password
+ADMIN_SESSION_SECRET=choose-a-long-random-secret
+TRACKING_BASE_URL=https://YOUR-MAIL-ADMIN.vercel.app
+TRACKING_ALLOWED_ORIGINS=https://YOUR-DESTINATION-WEBSITE.com
 ```
 
-## Add the website tracker
+Do not commit real values to GitHub.
 
-On the website that email recipients land on:
+## Connect Supabase
+
+Create a Supabase project and run `supabase/schema.sql` in the SQL editor. Then add:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+After redeploying, `/api/health` should report `supabase: true`, and dashboard contacts/campaigns/events will read directly from the database.
+
+## Connect the email provider
+
+The sending layer is intentionally provider-neutral. Add the provider adapter and its server-side credentials only after the provider is selected. Base configuration uses:
+
+```env
+EMAIL_PROVIDER=
+DEFAULT_FROM_EMAIL=
+EMAIL_WEBHOOK_SECRET=
+```
+
+Provider API keys must remain server-side environment variables.
+
+## Add tracking to the destination website
 
 ```html
 <script
@@ -84,9 +79,9 @@ On the website that email recipients land on:
 ></script>
 ```
 
-A page view is automatically recorded when the visitor arrived through an attributed campaign session.
+A page view is recorded only when an attributed Mail Admin session exists.
 
-To record an important button/action without editing JavaScript:
+Mark important actions without adding custom JavaScript:
 
 ```html
 <button data-mail-track="registration_started" data-mail-label="Start registration">
@@ -94,7 +89,7 @@ To record an important button/action without editing JavaScript:
 </button>
 ```
 
-Or call the tracker manually:
+Or record an explicit event:
 
 ```js
 window.MailAdminTracker.track("registration_completed", {
@@ -102,27 +97,16 @@ window.MailAdminTracker.track("registration_completed", {
 });
 ```
 
-Do not send passwords, message contents, form field values, payment details, or other sensitive information in event metadata.
+Do not place passwords, message contents, payment data, form field contents, or other sensitive information in tracking metadata.
 
-## Location and device information
+## Location and measurement limits
 
-The current backend is designed for approximate country/region metadata supplied by the hosting platform. It does not collect exact GPS coordinates automatically. Precise device location should only be requested when the visitor explicitly grants browser permission.
+The backend supports approximate country/region metadata supplied by the hosting platform. It does not silently collect exact GPS coordinates. Precise location requires explicit browser permission.
 
-## Email measurement
+Delivery and link clicks are stronger measurements than email opens. Email-security systems can inspect links automatically, so recorded click events include bot/scanner classification fields.
 
-Delivery and link clicks are treated as stronger measurements than email opens. Email security systems can automatically inspect links, so click events include an `is_bot` flag and optional `bot_reason`.
+## Useful checks
 
-## Next implementation stages
-
-1. Connect Supabase environment variables.
-2. Replace demo dashboard metrics with live database queries.
-3. Add CSV contact import and automatic deduplication.
-4. Add the Resend provider adapter and test-send workflow.
-5. Add verified provider webhooks for delivery, bounce, complaint, and unsubscribe events.
-6. Add campaign audience segmentation and scheduling.
-7. Add detailed recipient journey pages and campaign reports.
-8. Add authentication before production deployment.
-
-## Security before production
-
-The admin interface must be authenticated before it is deployed with real contact data. Service-role keys and email-provider keys must remain server-side. Suppression/unsubscribe rules should be enforced before every send.
+- `/api/health` — deployment and connection status
+- `/login` — protected admin login after `ADMIN_PASSWORD` and `ADMIN_SESSION_SECRET` are configured
+- `/` — live dashboard
