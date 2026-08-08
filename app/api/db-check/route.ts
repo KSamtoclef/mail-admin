@@ -22,6 +22,7 @@ const checks: CheckSpec[] = [
   { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,transport,status,scheduled_at,primary_link_url,audience_cutoff_at,audience_offset,audience_total,dispatch_started_at,completed_at,send_confirmed_at,failed_reason,created_at" },
   { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,broadcast_wave_id,resend_contact_synced_at,delivery_status,provider_message_id,queued_at,attempt_count,last_error,sent_at,delivered_at,bounced_at,complained_at,unsubscribed_at" },
   { name: "campaign_broadcast_waves", table: "campaign_broadcast_waves", columns: "id,campaign_id,wave_no,day_key,audience_offset_after,resend_segment_id,resend_broadcast_id,recipient_count,synced_count,status,started_at,sent_at,last_error" },
+  { name: "cookie_pilot_checks", table: "cookie_pilot_checks", columns: "id,purpose,campaign_id,broadcast_wave_id,ok,skipped,http_status,duration_ms,response_preview,error,created_at" },
   { name: "tracked_links", table: "tracked_links", columns: "id,campaign_id,label,destination_url" },
   { name: "tracking_sites", table: "tracking_sites", columns: "id,name,site_url,origin,active,created_at,updated_at" },
   { name: "send_settings", table: "send_settings", columns: "id,daily_send_limit,max_batch_size,timezone,sending_paused,updated_at" },
