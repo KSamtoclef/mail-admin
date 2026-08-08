@@ -233,7 +233,7 @@ export default function ConnectionsManager() {
           <div className="panelHeader"><h2>Resend</h2><button className="button" onClick={load}><RefreshCw size={14} /> Refresh</button></div>
           <div className="statusList">
             <StatusLine label="Provider" ready={provider?.provider === "resend"} text={provider?.provider === "resend" ? "Resend selected" : "Set EMAIL_PROVIDER=resend"} />
-            <StatusLine label="API key" ready={Boolean(provider?.apiKeyConfigured)} text={provider?.apiKeyConfigured ? "Server key detected" : "RESEND_API_KEY required"} />
+            <StatusLine label="API key" ready={Boolean(provider?.apiKeyConfigured)} text={provider?.apiKeyConfigured ? "Server key detected · Broadcast mode requires Full access" : "RESEND_API_KEY required · create a Full access key"} />
             <StatusLine label="Sender" ready={Boolean(provider?.fromEmailConfigured)} text={provider?.fromEmailConfigured ? (provider?.fromEmail ?? "Configured") : "DEFAULT_FROM_EMAIL required"} />
             <StatusLine label="Signed webhook" ready={Boolean(provider?.webhookConfigured)} text={provider?.webhookConfigured ? "Verification secret detected" : "RESEND_WEBHOOK_SECRET required"} />
           </div>
@@ -243,6 +243,7 @@ export default function ConnectionsManager() {
             <button className="button buttonPrimary" type="submit" disabled={busy || !provider?.configured}><Send size={15} /> Send test</button>
           </form>
           {providerMessage ? <div className="inlineMessage pageMessage">{providerMessage}</div> : null}
+          <p className="formHelp">Production Broadcasts create and manage Resend Contacts, Segments and Contact Properties, so use a Full access API key stored only in Vercel. Your Resend Marketing contact allowance must also cover the campaign audience.</p>
         </section>
       </div>
 
@@ -250,28 +251,28 @@ export default function ConnectionsManager() {
         <section className="panel">
           <div className="panelHeader"><h2>Sending controls</h2><span>{sendSettings?.sending_paused ? "Paused" : "Active"}</span></div>
           <div className="statsBar statsBarSecondary">
-            <div className="stat"><span className="statLabel">Sent today</span><strong className="statValue">{Number(sendUsage?.sent_today ?? 0).toLocaleString()}</strong></div>
+            <div className="stat"><span className="statLabel">Reserved today</span><strong className="statValue">{Number(sendUsage?.sent_today ?? 0).toLocaleString()}</strong></div>
             <div className="stat"><span className="statLabel">Daily limit</span><strong className="statValue">{Number(sendUsage?.daily_send_limit ?? sendSettings?.daily_send_limit ?? 0).toLocaleString()}</strong></div>
             <div className="stat"><span className="statLabel">Remaining</span><strong className="statValue">{Number(sendUsage?.remaining_today ?? 0).toLocaleString()}</strong></div>
-            <div className="stat"><span className="statLabel">Batch size</span><strong className="statValue">{Number(sendSettings?.max_batch_size ?? 0).toLocaleString()}</strong></div>
+            <div className="stat"><span className="statLabel">Legacy batch ceiling</span><strong className="statValue">{Number(sendSettings?.max_batch_size ?? 0).toLocaleString()}</strong></div>
           </div>
           <form onSubmit={saveSendSettings} className="editorPanel">
             <div className="formRow formRowTwo">
-              <div><label>Maximum emails per day</label><input className="input" type="number" min="1" max="1000000" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} /></div>
-              <div><label>Maximum per API batch</label><input className="input" type="number" min="1" max="100" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} /></div>
+              <div><label>Maximum marketing emails per day</label><input className="input" type="number" min="1" max="1000000" value={dailyLimit} onChange={(e) => setDailyLimit(e.target.value)} /></div>
+              <div><label>Legacy/test API batch ceiling</label><input className="input" type="number" min="1" max="100" value={batchSize} onChange={(e) => setBatchSize(e.target.value)} /></div>
             </div>
             <div className="formRow"><div><label>Daily reset timezone</label><input className="input" value={timezone} onChange={(e) => setTimezone(e.target.value)} placeholder="Africa/Lagos" /></div></div>
             <div className="pageActions"><button className="button buttonPrimary" disabled={busy}><Save size={14} /> Save limits</button><button className="button" type="button" onClick={toggleSending} disabled={busy || !sendSettings}>{sendSettings?.sending_paused ? <Play size={14} /> : <Pause size={14} />} {sendSettings?.sending_paused ? "Resume sending" : "Pause sending"}</button></div>
             {sendMessage ? <div className="inlineMessage pageMessage">{sendMessage}</div> : null}
-            <p className="formHelp">The campaign dispatch backend will enforce this limit before sending; the UI value is not just informational.</p>
+            <p className="formHelp">The daily limit is enforced in the database before a Broadcast wave is prepared. Resend manages the internal queue and batching for marketing Broadcasts; the legacy batch ceiling is retained for test/fallback email endpoints.</p>
           </form>
         </section>
 
         <section className="panel">
           <div className="panelHeader"><h2>Resend webhook</h2><span>Signed endpoint</span></div>
           <div style={{ padding: 15 }}>
-            <p className="bodyText">Register this endpoint in Resend for delivery events. Keep the signing secret in Vercel as <code>RESEND_WEBHOOK_SECRET</code>.</p>
-            <div className="fileLine"><div><strong>{webhookUrl}</strong><span>Recommended events: sent, delivered, bounced, complained, failed, suppressed and clicked.</span></div><button className="button" onClick={() => copy(webhookUrl, "webhook")}>{copied === "webhook" ? <Check size={14} /> : <Clipboard size={14} />} {copied === "webhook" ? "Copied" : "Copy"}</button></div>
+            <p className="bodyText">Register this endpoint in Resend and keep the signing secret in Vercel as <code>RESEND_WEBHOOK_SECRET</code>.</p>
+            <div className="fileLine"><div><strong>{webhookUrl}</strong><span>Events: sent, delivered, bounced, complained, failed, suppressed, clicked and contact.updated. Opened is optional.</span></div><button className="button" onClick={() => copy(webhookUrl, "webhook")}>{copied === "webhook" ? <Check size={14} /> : <Clipboard size={14} />} {copied === "webhook" ? "Copied" : "Copy"}</button></div>
           </div>
         </section>
       </div>
