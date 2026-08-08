@@ -28,6 +28,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
   const [scheduledAt, setScheduledAt] = useState("");
   const [activeTarget, setActiveTarget] = useState<"subject" | "body">("body");
   const [message, setMessage] = useState("");
+  const [savedId, setSavedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const subjectRef = useRef<HTMLInputElement>(null);
@@ -69,6 +70,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
   async function save(event: FormEvent) {
     event.preventDefault();
     setMessage("");
+    setSavedId(null);
     if (!name.trim() || !subject.trim() || !body.trim()) {
       setMessage("Campaign name, subject and message are required.");
       return;
@@ -100,6 +102,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
         return;
       }
       setMessage(result.campaign?.status === "scheduled" ? "Campaign scheduled." : "Draft saved.");
+      setSavedId(typeof result.campaign?.id === "string" ? result.campaign.id : null);
       await onSaved?.();
     } catch {
       setMessage("The campaign request did not complete.");
@@ -126,7 +129,7 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
             <div><label>Tracking</label><select className="select" value={trackingMode} onChange={(e) => setTrackingMode(e.target.value)}><option value="clicks_and_site">Clicks + site events</option><option value="clicks_only">Clicks only</option><option value="delivery_only">Delivery only</option></select></div>
             <div><label>Schedule</label><input className="input" type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
           </div>
-          <div className="composerActions"><button className="button buttonPrimary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save campaign"}</button>{message ? <span className="composerMessage">{message}</span> : null}</div>
+          <div className="composerActions"><button className="button buttonPrimary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save campaign"}</button>{message ? <span className="composerMessage">{message}</span> : null}{savedId ? <a className="button" href={`/campaigns/${savedId}`}>Open campaign</a> : null}</div>
           <p className="formHelp">Tags are resolved separately for every recipient. Unknown tags are left visible instead of silently deleting content.</p>
         </form>
 
