@@ -17,10 +17,11 @@ type CheckResult = {
 };
 
 const checks: CheckSpec[] = [
-  { name: "contacts", table: "contacts", columns: "id,external_user_id,external_session_id,username,email,country_code,status,created_at" },
+  { name: "contacts", table: "contacts", columns: "id,external_user_id,external_session_id,broadcast_tracking_token,username,email,country_code,status,created_at" },
   { name: "contact_imports", table: "contact_imports", columns: "id,filename,total_rows,valid_rows,unique_rows,added_rows,updated_rows,duplicate_rows,invalid_rows,created_at" },
-  { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,status,scheduled_at,primary_link_url,audience_cutoff_at,audience_offset,audience_total,dispatch_started_at,completed_at,send_confirmed_at,failed_reason,created_at" },
-  { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,delivery_status,provider_message_id,queued_at,attempt_count,last_error,sent_at,delivered_at,bounced_at,complained_at,unsubscribed_at" },
+  { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,transport,status,scheduled_at,primary_link_url,audience_cutoff_at,audience_offset,audience_total,dispatch_started_at,completed_at,send_confirmed_at,failed_reason,created_at" },
+  { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,broadcast_wave_id,resend_contact_synced_at,delivery_status,provider_message_id,queued_at,attempt_count,last_error,sent_at,delivered_at,bounced_at,complained_at,unsubscribed_at" },
+  { name: "campaign_broadcast_waves", table: "campaign_broadcast_waves", columns: "id,campaign_id,wave_no,day_key,resend_segment_id,resend_broadcast_id,recipient_count,synced_count,status,started_at,sent_at,last_error" },
   { name: "tracked_links", table: "tracked_links", columns: "id,campaign_id,label,destination_url" },
   { name: "tracking_sites", table: "tracking_sites", columns: "id,name,site_url,origin,active,created_at,updated_at" },
   { name: "send_settings", table: "send_settings", columns: "id,daily_send_limit,max_batch_size,timezone,sending_paused,updated_at" },
@@ -33,7 +34,7 @@ const checks: CheckSpec[] = [
 
 export async function GET() {
   try {
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseAdmin() as any;
     const tableResults: CheckResult[] = await Promise.all(checks.map(async (check) => {
       const result = await supabase.from(check.table).select(check.columns).limit(1);
       return {
@@ -44,7 +45,19 @@ export async function GET() {
       };
     }));
 
-    const usageResult = await supabase.rpc("mail_daily_send_usage");
+    const [usageResult, reserveCheck, releaseCheck] = await Promise.all([
+      supabase.rpc("mail_daily_send_usage"),
+      supabase.rpc("mail_reserve_broadcast_quota", { requested: 1 }),
+      Promise.resolve(null)
+    ]);
+
+    let releaseResult: { error?: { message?: string; code?: string } | null } | null = releaseCheck;
+    if (!reserveCheck.error && Number(reserveCheck.data?.[0]?.allowed ?? 0) > 0) {
+      releaseResult = await supabase.rpc("mail_release_send_quota", { release_count: 1 });
+    } else if (!reserveCheck.error) {
+      releaseResult = { error: null };
+    }
+
     const results: CheckResult[] = [
       ...tableResults,
       {
@@ -52,6 +65,18 @@ export async function GET() {
         ok: !usageResult.error,
         error: usageResult.error?.message ?? null,
         code: usageResult.error?.code ?? null
+      },
+      {
+        name: "mail_reserve_broadcast_quota",
+        ok: !reserveCheck.error,
+        error: reserveCheck.error?.message ?? null,
+        code: reserveCheck.error?.code ?? null
+      },
+      {
+        name: "mail_release_send_quota",
+        ok: !releaseResult?.error,
+        error: releaseResult?.error?.message ?? null,
+        code: releaseResult?.error?.code ?? null
       }
     ];
 
