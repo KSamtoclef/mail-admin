@@ -1,11 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { useSearchParams } from "next/navigation";
 
 export default function LoginPage() {
-  const params = useSearchParams();
-  const next = params.get("next") || "/";
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -26,7 +23,8 @@ export default function LoginPage() {
         setError(result.error || "Unable to sign in");
         return;
       }
-      window.location.href = next;
+      const next = new URLSearchParams(window.location.search).get("next") || "/";
+      window.location.href = next.startsWith("/") ? next : "/";
     } finally {
       setLoading(false);
     }
