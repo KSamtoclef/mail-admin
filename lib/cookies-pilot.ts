@@ -2,6 +2,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 const PROCESSING_WINDOW_MS = 3000;
 const REQUEST_TIMEOUT_MS = 10000;
+const MAX_ATTEMPTS = 3;
 const MAX_RESPONSE_PREVIEW = 1000;
 const CAMPAIGN_CHECK_REUSE_MS = 15 * 60 * 1000;
 
@@ -91,6 +92,10 @@ export function getCookiesPilotStatus() {
   };
 }
 
+function shouldRetryHttpStatus(status: number) {
+  return status === 404 || status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
 async function callCookiesPilotEndpoint(): Promise<CookiesPilotCheckResult> {
   const status = getCookiesPilotStatus();
   if (!status.enabled) {
@@ -116,67 +121,97 @@ async function callCookiesPilotEndpoint(): Promise<CookiesPilotCheckResult> {
     };
   }
 
-  const started = Date.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const overallStarted = Date.now();
+  let lastHttpStatus: number | null = null;
+  let lastResponsePreview: string | null = null;
+  let lastError: string | null = null;
 
-  try {
-    const response = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        Accept: "application/json, text/plain, */*",
-        "User-Agent": "mail-admin/1.0"
-      },
-      redirect: "follow",
-      cache: "no-store",
-      signal: controller.signal
-    });
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    const attemptStarted = Date.now();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    const raw = await response.text().catch(() => "");
-    const elapsed = Date.now() - started;
-    if (elapsed < PROCESSING_WINDOW_MS) {
-      await sleep(PROCESSING_WINDOW_MS - elapsed);
-    }
+    try {
+      const response = await fetch(endpoint, {
+        method: "GET",
+        headers: {
+          Accept: "application/json, text/plain, */*",
+          "User-Agent": "mail-admin/1.0"
+        },
+        redirect: "follow",
+        cache: "no-store",
+        signal: controller.signal
+      });
 
-    const finalDuration = Date.now() - started;
-    const responsePreview = raw ? raw.slice(0, MAX_RESPONSE_PREVIEW) : null;
+      const raw = await response.text().catch(() => "");
+      lastHttpStatus = response.status;
+      lastResponsePreview = raw ? raw.slice(0, MAX_RESPONSE_PREVIEW) : null;
+      lastError = response.ok ? null : `Cookies Pilot CURL returned HTTP ${response.status}`;
 
-    if (!response.ok) {
-      return {
-        ok: false,
-        skipped: false,
-        httpStatus: response.status,
-        durationMs: finalDuration,
-        responsePreview,
-        error: `Cookies Pilot CURL returned HTTP ${response.status}`
-      };
-    }
+      const attemptElapsed = Date.now() - attemptStarted;
+      if (attemptElapsed < PROCESSING_WINDOW_MS) {
+        await sleep(PROCESSING_WINDOW_MS - attemptElapsed);
+      }
 
-    return {
-      ok: true,
-      skipped: false,
-      httpStatus: response.status,
-      durationMs: finalDuration,
-      responsePreview,
-      error: null
-    };
-  } catch (error) {
-    const aborted = error instanceof Error && error.name === "AbortError";
-    return {
-      ok: false,
-      skipped: false,
-      httpStatus: null,
-      durationMs: Date.now() - started,
-      responsePreview: null,
-      error: aborted
+      if (response.ok) {
+        return {
+          ok: true,
+          skipped: false,
+          httpStatus: response.status,
+          durationMs: Date.now() - overallStarted,
+          responsePreview: lastResponsePreview,
+          error: null
+        };
+      }
+
+      if (!shouldRetryHttpStatus(response.status) || attempt === MAX_ATTEMPTS) {
+        return {
+          ok: false,
+          skipped: false,
+          httpStatus: response.status,
+          durationMs: Date.now() - overallStarted,
+          responsePreview: lastResponsePreview,
+          error: `${lastError}${attempt > 1 ? ` after ${attempt} attempts` : ""}`
+        };
+      }
+    } catch (error) {
+      const aborted = error instanceof Error && error.name === "AbortError";
+      lastHttpStatus = null;
+      lastResponsePreview = null;
+      lastError = aborted
         ? "Cookies Pilot CURL timed out"
         : error instanceof Error
           ? error.message
-          : "Cookies Pilot CURL request failed"
-    };
-  } finally {
-    clearTimeout(timeout);
+          : "Cookies Pilot CURL request failed";
+
+      if (attempt === MAX_ATTEMPTS) {
+        return {
+          ok: false,
+          skipped: false,
+          httpStatus: lastHttpStatus,
+          durationMs: Date.now() - overallStarted,
+          responsePreview: lastResponsePreview,
+          error: `${lastError} after ${attempt} attempts`
+        };
+      }
+
+      const attemptElapsed = Date.now() - attemptStarted;
+      if (attemptElapsed < PROCESSING_WINDOW_MS) {
+        await sleep(PROCESSING_WINDOW_MS - attemptElapsed);
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
   }
+
+  return {
+    ok: false,
+    skipped: false,
+    httpStatus: lastHttpStatus,
+    durationMs: Date.now() - overallStarted,
+    responsePreview: lastResponsePreview,
+    error: lastError ?? "Cookies Pilot CURL request failed"
+  };
 }
 
 async function recordCheck(input: {
