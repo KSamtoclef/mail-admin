@@ -3,7 +3,20 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
 
-const checks = [
+type CheckSpec = {
+  name: string;
+  table: string;
+  columns: string;
+};
+
+type CheckResult = {
+  name: string;
+  ok: boolean;
+  error: string | null;
+  code: string | null;
+};
+
+const checks: CheckSpec[] = [
   { name: "contacts", table: "contacts", columns: "id,external_user_id,external_session_id,username,email,country_code,status,created_at" },
   { name: "contact_imports", table: "contact_imports", columns: "id,filename,total_rows,valid_rows,unique_rows,added_rows,updated_rows,duplicate_rows,invalid_rows,created_at" },
   { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,status,scheduled_at,created_at" },
@@ -15,14 +28,7 @@ const checks = [
   { name: "events", table: "events", columns: "id,event_type,occurred_at,is_bot,bot_reason,country_code,region,device_type,browser,contact_id,campaign_id,recipient_id,session_id,link_id" },
   { name: "suppression_list", table: "suppression_list", columns: "id,email_normalized,reason,created_at" },
   { name: "provider_webhook_events", table: "provider_webhook_events", columns: "id,provider,provider_event_id,event_type,provider_message_id,received_at" }
-] as const;
-
-type CheckResult = {
-  name: string;
-  ok: boolean;
-  error: string | null;
-  code: string | null;
-};
+];
 
 export async function GET() {
   try {
