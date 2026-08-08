@@ -13,7 +13,10 @@ function isPublicPath(pathname: string) {
     pathname.startsWith("/api/events") ||
     pathname.startsWith("/api/sessions") ||
     pathname.startsWith("/api/webhooks/") ||
+    pathname.startsWith("/api/unsubscribe/") ||
+    pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/c/") ||
+    pathname.startsWith("/u/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico" ||
     pathname === "/mail-tracker.js";
