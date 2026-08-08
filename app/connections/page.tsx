@@ -1,4 +1,5 @@
 import ConnectionsManager from "@/components/ConnectionsManager";
+import CookiesPilotPanel from "@/components/CookiesPilotPanel";
 
 export default function ConnectionsPage() {
   return (
@@ -9,9 +10,10 @@ export default function ConnectionsPage() {
       <header className="pageHeader">
         <div>
           <h1>Connections</h1>
-          <p>Manage tracking sites and email-provider connectivity.</p>
+          <p>Manage Cookies Pilot, tracking sites and Resend connectivity.</p>
         </div>
       </header>
+      <CookiesPilotPanel />
       <ConnectionsManager />
     </main>
   );
