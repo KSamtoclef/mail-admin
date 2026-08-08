@@ -27,6 +27,7 @@ const noStoreHeaders = { "Cache-Control": "no-store" };
 export async function GET() {
   const providerConfigured = Boolean(process.env.EMAIL_PROVIDER && process.env.DEFAULT_FROM_EMAIL);
   const trackingConfigured = trackingIsConfigured();
+  const trackingBaseUrl = process.env.TRACKING_BASE_URL?.replace(/\/$/, "") ?? null;
   const authConfigured = Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET);
 
   if (!hasSupabaseConfig()) {
@@ -35,6 +36,7 @@ export async function GET() {
       authConfigured,
       providerConfigured,
       trackingConfigured,
+      trackingBaseUrl,
       metrics: emptyMetrics,
       campaigns: [],
       contacts: [],
@@ -105,6 +107,7 @@ export async function GET() {
         authConfigured,
         providerConfigured,
         trackingConfigured,
+        trackingBaseUrl,
         metrics: emptyMetrics,
         campaigns: [],
         contacts: [],
@@ -121,6 +124,7 @@ export async function GET() {
       authConfigured,
       providerConfigured,
       trackingConfigured,
+      trackingBaseUrl,
       metrics: {
         contacts: contactsCount.count ?? 0,
         activeContacts: activeContactsCount.count ?? 0,
@@ -144,6 +148,7 @@ export async function GET() {
       authConfigured,
       providerConfigured,
       trackingConfigured,
+      trackingBaseUrl,
       metrics: emptyMetrics,
       campaigns: [],
       contacts: [],
