@@ -8,6 +8,7 @@ export const maxDuration = 60;
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const BATCH_SIZE = 500;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i;
+const noStoreHeaders = { "Cache-Control": "no-store" };
 
 type CsvRow = Record<string, string | undefined>;
 
@@ -16,6 +17,10 @@ type CleanContact = {
   external_session_id: string | null;
   username: string;
   email: string;
+};
+
+type StoredContact = CleanContact & {
+  email_normalized: string;
 };
 
 function canonicalHeader(value: string) {
@@ -33,7 +38,11 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function mergeContact(existing: CleanContact, incoming: CleanContact): CleanContact {
+function normalizedEmail(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function mergeFileDuplicate(existing: CleanContact, incoming: CleanContact): CleanContact {
   return {
     external_user_id: existing.external_user_id || incoming.external_user_id,
     external_session_id: existing.external_session_id || incoming.external_session_id,
@@ -42,21 +51,36 @@ function mergeContact(existing: CleanContact, incoming: CleanContact): CleanCont
   };
 }
 
+function mergeWithStored(stored: StoredContact, incoming: CleanContact): CleanContact {
+  return {
+    external_user_id: incoming.external_user_id || stored.external_user_id || null,
+    external_session_id: incoming.external_session_id || stored.external_session_id || null,
+    username: incoming.username || stored.username,
+    email: incoming.email || stored.email
+  };
+}
+
+function chunks<T>(items: T[], size: number) {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
+  return result;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const uploaded = formData.get("file");
 
     if (!(uploaded instanceof File)) {
-      return NextResponse.json({ ok: false, error: "Choose a CSV file first." }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "Choose a CSV file first." }, { status: 400, headers: noStoreHeaders });
     }
 
     if (uploaded.size === 0) {
-      return NextResponse.json({ ok: false, error: "The selected CSV file is empty." }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "The selected CSV file is empty." }, { status: 400, headers: noStoreHeaders });
     }
 
     if (uploaded.size > MAX_FILE_BYTES) {
-      return NextResponse.json({ ok: false, error: "CSV is larger than the 8 MB import limit." }, { status: 413 });
+      return NextResponse.json({ ok: false, error: "CSV is larger than the 8 MB import limit." }, { status: 413, headers: noStoreHeaders });
     }
 
     const csvText = await uploaded.text();
@@ -74,11 +98,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         ok: false,
         error: error instanceof Error ? `Unable to parse CSV: ${error.message}` : "Unable to parse CSV."
-      }, { status: 400 });
+      }, { status: 400, headers: noStoreHeaders });
     }
 
     if (!rows.length) {
-      return NextResponse.json({ ok: false, error: "No data rows were found in the CSV." }, { status: 400 });
+      return NextResponse.json({ ok: false, error: "No data rows were found in the CSV." }, { status: 400, headers: noStoreHeaders });
     }
 
     const deduped = new Map<string, CleanContact>();
@@ -113,7 +137,7 @@ export async function POST(request: NextRequest) {
       }
 
       validRows += 1;
-      const normalizedEmail = email.toLowerCase();
+      const key = normalizedEmail(email);
       const contact: CleanContact = {
         external_user_id: userId || null,
         external_session_id: sessionId || null,
@@ -121,31 +145,51 @@ export async function POST(request: NextRequest) {
         email
       };
 
-      const existing = deduped.get(normalizedEmail);
+      const existing = deduped.get(key);
       if (existing) {
         duplicateRows += 1;
-        deduped.set(normalizedEmail, mergeContact(existing, contact));
+        deduped.set(key, mergeFileDuplicate(existing, contact));
       } else {
-        deduped.set(normalizedEmail, contact);
+        deduped.set(key, contact);
       }
     });
 
-    const contacts = Array.from(deduped.values());
-    if (!contacts.length) {
+    const incomingContacts = Array.from(deduped.values());
+    if (!incomingContacts.length) {
       return NextResponse.json({
         ok: false,
         error: "No importable contacts remained after validation.",
         summary: { totalRows: rows.length, validRows, uniqueRows: 0, duplicateRows, invalidRows },
         invalidSamples
-      }, { status: 400 });
+      }, { status: 400, headers: noStoreHeaders });
     }
 
     const supabase = getSupabaseAdmin();
-    const beforeResult = await supabase.from("contacts").select("id", { count: "exact", head: true });
+    const incomingKeys = incomingContacts.map((contact) => normalizedEmail(contact.email));
+    const storedByEmail = new Map<string, StoredContact>();
 
-    if (beforeResult.error) {
-      return NextResponse.json({ ok: false, error: beforeResult.error.message }, { status: 500 });
+    for (const keyBatch of chunks(incomingKeys, BATCH_SIZE)) {
+      const { data, error } = await supabase
+        .from("contacts")
+        .select("external_user_id,external_session_id,username,email,email_normalized")
+        .in("email_normalized", keyBatch);
+
+      if (error) {
+        return NextResponse.json({ ok: false, error: `Unable to compare existing contacts: ${error.message}` }, { status: 500, headers: noStoreHeaders });
+      }
+
+      for (const row of (data ?? []) as StoredContact[]) {
+        storedByEmail.set(row.email_normalized, row);
+      }
     }
+
+    const contacts = incomingContacts.map((incoming) => {
+      const stored = storedByEmail.get(normalizedEmail(incoming.email));
+      return stored ? mergeWithStored(stored, incoming) : incoming;
+    });
+
+    const addedRows = incomingKeys.filter((key) => !storedByEmail.has(key)).length;
+    const updatedRows = contacts.length - addedRows;
 
     for (let start = 0; start < contacts.length; start += BATCH_SIZE) {
       const batch = contacts.slice(start, start + BATCH_SIZE);
@@ -156,21 +200,16 @@ export async function POST(request: NextRequest) {
       if (error) {
         return NextResponse.json({
           ok: false,
-          error: `Import stopped at row batch ${Math.floor(start / BATCH_SIZE) + 1}: ${error.message}`,
+          error: `Import stopped at batch ${Math.floor(start / BATCH_SIZE) + 1}: ${error.message}`,
           importedBeforeFailure: start
-        }, { status: 500 });
+        }, { status: 500, headers: noStoreHeaders });
       }
     }
 
     const afterResult = await supabase.from("contacts").select("id", { count: "exact", head: true });
     if (afterResult.error) {
-      return NextResponse.json({ ok: false, error: afterResult.error.message }, { status: 500 });
+      return NextResponse.json({ ok: false, error: afterResult.error.message }, { status: 500, headers: noStoreHeaders });
     }
-
-    const beforeCount = beforeResult.count ?? 0;
-    const afterCount = afterResult.count ?? beforeCount;
-    const addedRows = Math.max(0, afterCount - beforeCount);
-    const updatedRows = Math.max(0, contacts.length - addedRows);
 
     const summary = {
       filename: uploaded.name,
@@ -181,7 +220,7 @@ export async function POST(request: NextRequest) {
       updatedRows,
       duplicateRows,
       invalidRows,
-      totalContactsAfterImport: afterCount
+      totalContactsAfterImport: afterResult.count ?? contacts.length
     };
 
     const audit = await supabase.from("contact_imports").insert({
@@ -201,11 +240,11 @@ export async function POST(request: NextRequest) {
       invalidSamples,
       auditSaved: !audit.error,
       auditError: audit.error?.message ?? null
-    });
+    }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json({
       ok: false,
       error: error instanceof Error ? error.message : "Unable to import contacts."
-    }, { status: 500 });
+    }, { status: 500, headers: noStoreHeaders });
   }
 }
