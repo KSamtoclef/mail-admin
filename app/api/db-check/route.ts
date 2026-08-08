@@ -17,10 +17,17 @@ const checks = [
   { name: "provider_webhook_events", table: "provider_webhook_events", columns: "id,provider,provider_event_id,event_type,provider_message_id,received_at" }
 ] as const;
 
+type CheckResult = {
+  name: string;
+  ok: boolean;
+  error: string | null;
+  code: string | null;
+};
+
 export async function GET() {
   try {
     const supabase = getSupabaseAdmin();
-    const results = await Promise.all(checks.map(async (check) => {
+    const tableResults: CheckResult[] = await Promise.all(checks.map(async (check) => {
       const result = await supabase.from(check.table).select(check.columns).limit(1);
       return {
         name: check.name,
@@ -31,12 +38,15 @@ export async function GET() {
     }));
 
     const usageResult = await supabase.rpc("mail_daily_send_usage");
-    results.push({
-      name: "mail_daily_send_usage",
-      ok: !usageResult.error,
-      error: usageResult.error?.message ?? null,
-      code: usageResult.error?.code ?? null
-    });
+    const results: CheckResult[] = [
+      ...tableResults,
+      {
+        name: "mail_daily_send_usage",
+        ok: !usageResult.error,
+        error: usageResult.error?.message ?? null,
+        code: usageResult.error?.code ?? null
+      }
+    ];
 
     return NextResponse.json({
       ok: results.every((result) => result.ok),
