@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { processCampaignBatch } from "@/lib/campaign-dispatch";
+import { processCampaignBroadcastWave } from "@/lib/resend-broadcast-dispatch";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, state: "idle" }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    const result = await processCampaignBatch(campaignResult.data.id);
+    const result = await processCampaignBroadcastWave(campaignResult.data.id);
     return NextResponse.json({ ok: true, campaignId: campaignResult.data.id, result }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({
