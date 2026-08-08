@@ -3,6 +3,7 @@ create extension if not exists pgcrypto;
 create table if not exists contacts (
   id uuid primary key default gen_random_uuid(),
   external_user_id text,
+  external_session_id text,
   email text not null,
   email_normalized text generated always as (lower(trim(email))) stored,
   username text,
@@ -10,6 +11,19 @@ create table if not exists contacts (
   status text not null default 'active' check (status in ('active','suppressed','unsubscribed','bounced')),
   created_at timestamptz not null default now(),
   unique(email_normalized)
+);
+
+create table if not exists contact_imports (
+  id uuid primary key default gen_random_uuid(),
+  filename text not null,
+  total_rows integer not null default 0,
+  valid_rows integer not null default 0,
+  unique_rows integer not null default 0,
+  added_rows integer not null default 0,
+  updated_rows integer not null default 0,
+  duplicate_rows integer not null default 0,
+  invalid_rows integer not null default 0,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists suppression_list (
@@ -105,6 +119,7 @@ create table if not exists provider_webhook_events (
   unique(provider, provider_event_id)
 );
 
+create index if not exists idx_contact_imports_created_at on contact_imports(created_at desc);
 create index if not exists idx_campaign_recipients_campaign on campaign_recipients(campaign_id);
 create index if not exists idx_campaign_recipients_message on campaign_recipients(provider_message_id);
 create index if not exists idx_events_campaign_time on events(campaign_id, occurred_at desc);
