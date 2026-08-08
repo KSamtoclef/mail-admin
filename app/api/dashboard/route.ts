@@ -41,7 +41,8 @@ export async function GET() {
       campaigns: [],
       contacts: [],
       imports: [],
-      events: []
+      events: [],
+      warnings: ["Supabase environment variables are not configured."]
     }, { headers: noStoreHeaders });
   }
 
@@ -84,24 +85,31 @@ export async function GET() {
         .limit(50)
     ]);
 
-    const errors = [
-      contactsCount.error,
-      activeContactsCount.error,
-      missingUsernamesCount.error,
-      deliveredCount.error,
-      attributedSessionsCount.error,
-      anonymousSessionsCount.error,
-      humanClicksCount.error,
-      botClicksCount.error,
-      totalEventsCount.error,
-      clickRows.error,
-      campaigns.error,
-      contacts.error,
-      imports.error,
-      events.error
-    ].filter(Boolean);
+    const warnings: string[] = [];
+    const recordWarning = (label: string, error: { message?: string } | null) => {
+      if (error?.message) warnings.push(`${label}: ${error.message}`);
+    };
 
-    if (errors.length) {
+    recordWarning("contacts count", contactsCount.error);
+    recordWarning("active contacts", activeContactsCount.error);
+    recordWarning("username integrity", missingUsernamesCount.error);
+    recordWarning("delivery metrics", deliveredCount.error);
+    recordWarning("attributed sessions", attributedSessionsCount.error);
+    recordWarning("anonymous sessions", anonymousSessionsCount.error);
+    recordWarning("human clicks", humanClicksCount.error);
+    recordWarning("bot clicks", botClicksCount.error);
+    recordWarning("event count", totalEventsCount.error);
+    recordWarning("unique clickers", clickRows.error);
+    recordWarning("campaign list", campaigns.error);
+    recordWarning("contact list", contacts.error);
+    recordWarning("import history", imports.error);
+    recordWarning("event feed", events.error);
+
+    // A readable contacts table is enough to prove the database connection itself is live.
+    // Optional analytics tables can fail independently without wiping the whole workspace.
+    const connected = !contactsCount.error;
+
+    if (!connected) {
       return NextResponse.json({
         connected: false,
         authConfigured,
@@ -113,11 +121,14 @@ export async function GET() {
         contacts: [],
         imports: [],
         events: [],
-        error: errors[0]?.message ?? "Unable to read dashboard data"
+        warnings,
+        error: contactsCount.error?.message ?? "Unable to read contacts table"
       }, { status: 500, headers: noStoreHeaders });
     }
 
-    const uniqueClickers = new Set((clickRows.data ?? []).map((row) => row.contact_id).filter(Boolean)).size;
+    const uniqueClickers = clickRows.error
+      ? 0
+      : new Set((clickRows.data ?? []).map((row) => row.contact_id).filter(Boolean)).size;
 
     return NextResponse.json({
       connected: true,
@@ -125,22 +136,24 @@ export async function GET() {
       providerConfigured,
       trackingConfigured,
       trackingBaseUrl,
+      schemaHealthy: warnings.length === 0,
+      warnings,
       metrics: {
         contacts: contactsCount.count ?? 0,
-        activeContacts: activeContactsCount.count ?? 0,
-        missingUsernames: missingUsernamesCount.count ?? 0,
-        delivered: deliveredCount.count ?? 0,
+        activeContacts: activeContactsCount.error ? 0 : (activeContactsCount.count ?? 0),
+        missingUsernames: missingUsernamesCount.error ? 0 : (missingUsernamesCount.count ?? 0),
+        delivered: deliveredCount.error ? 0 : (deliveredCount.count ?? 0),
         uniqueClickers,
-        humanClicks: humanClicksCount.count ?? 0,
-        botClicks: botClicksCount.count ?? 0,
-        attributedSessions: attributedSessionsCount.count ?? 0,
-        anonymousSessions: anonymousSessionsCount.count ?? 0,
-        totalEvents: totalEventsCount.count ?? 0
+        humanClicks: humanClicksCount.error ? 0 : (humanClicksCount.count ?? 0),
+        botClicks: botClicksCount.error ? 0 : (botClicksCount.count ?? 0),
+        attributedSessions: attributedSessionsCount.error ? 0 : (attributedSessionsCount.count ?? 0),
+        anonymousSessions: anonymousSessionsCount.error ? 0 : (anonymousSessionsCount.count ?? 0),
+        totalEvents: totalEventsCount.error ? 0 : (totalEventsCount.count ?? 0)
       },
-      campaigns: campaigns.data ?? [],
-      contacts: contacts.data ?? [],
-      imports: imports.data ?? [],
-      events: events.data ?? []
+      campaigns: campaigns.error ? [] : (campaigns.data ?? []),
+      contacts: contacts.error ? [] : (contacts.data ?? []),
+      imports: imports.error ? [] : (imports.data ?? []),
+      events: events.error ? [] : (events.data ?? [])
     }, { headers: noStoreHeaders });
   } catch (error) {
     return NextResponse.json({
@@ -154,6 +167,7 @@ export async function GET() {
       contacts: [],
       imports: [],
       events: [],
+      warnings: [],
       error: error instanceof Error ? error.message : "Unable to load dashboard"
     }, { status: 500, headers: noStoreHeaders });
   }
