@@ -17,6 +17,8 @@ const previewValues = {
   unsubscribe_url: "https://mail-admin.example/u/example"
 };
 
+const recipientSubjectTags = /{{\s*(full_name|first_name|last_name|email|country|user_id|session_id|tracked_link|unsubscribe_url)\s*}}/i;
+
 export default function CampaignComposer({ onSaved }: { onSaved?: () => void | Promise<void> }) {
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
@@ -36,7 +38,8 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
 
   const previewSubject = useMemo(() => renderTemplate(subject || "Subject preview", previewValues), [subject]);
   const previewBody = useMemo(() => renderTemplate(body || "Your message will appear here.", previewValues), [body]);
-  const usesTrackedLink = subject.includes("{{tracked_link}}") || body.includes("{{tracked_link}}");
+  const usesTrackedLink = body.includes("{{tracked_link}}");
+  const subjectHasRecipientTag = recipientSubjectTags.test(subject);
 
   function insertAtCursor(value: string, token: string, start: number | null, end: number | null) {
     const from = start ?? value.length;
@@ -46,6 +49,12 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
 
   function insertTag(token: string) {
     if (activeTarget === "subject") {
+      if (token !== "{{campaign_name}}") {
+        setMessage("Recipient-specific tags belong in the message body when using Resend Broadcasts. The subject can use {{campaign_name}}.");
+        bodyRef.current?.focus();
+        setActiveTarget("body");
+        return;
+      }
       const element = subjectRef.current;
       const next = insertAtCursor(subject, token, element?.selectionStart ?? null, element?.selectionEnd ?? null);
       setSubject(next);
@@ -73,6 +82,10 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
     setSavedId(null);
     if (!name.trim() || !subject.trim() || !body.trim()) {
       setMessage("Campaign name, subject and message are required.");
+      return;
+    }
+    if (subjectHasRecipientTag) {
+      setMessage("Move recipient-specific subject tags into the message body. Resend Broadcast subjects are kept static in Mail Admin.");
       return;
     }
     if (usesTrackedLink && !primaryLinkUrl.trim()) {
@@ -122,15 +135,15 @@ export default function CampaignComposer({ onSaved }: { onSaved?: () => void | P
             <div><label>From name</label><input className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Earn Chat" /></div>
             <div><label>Reply-to</label><input className="input" type="email" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder="support@earn-chat.com" /></div>
           </div>
-          <div className="formRow"><div><label>Subject</label><input ref={subjectRef} className="input" value={subject} onFocus={() => setActiveTarget("subject")} onChange={(e) => setSubject(e.target.value)} placeholder="Hey {{first_name}}, we have an update" /></div></div>
+          <div className="formRow"><div><label>Subject</label><input ref={subjectRef} className="input" value={subject} onFocus={() => setActiveTarget("subject")} onChange={(e) => setSubject(e.target.value)} placeholder="Your August update" /><p className="formHelp">Broadcast subjects stay static. <code>{"{{campaign_name}}"}</code> is supported; recipient tags are inserted into the message body.</p></div></div>
           <div className="formRow"><div><label>Message</label><textarea ref={bodyRef} className="textarea" value={body} onFocus={() => setActiveTarget("body")} onChange={(e) => setBody(e.target.value)} placeholder={'Hi {{first_name}},\n\nVisit your dashboard: {{tracked_link}}\n\nUnsubscribe: {{unsubscribe_url}}'} /></div></div>
-          <div className="formRow"><div><label>Tracked destination URL</label><input className="input" type="url" value={primaryLinkUrl} onChange={(e) => setPrimaryLinkUrl(e.target.value)} placeholder="https://www.earn-chat.com/" /><p className="formHelp">Required only when you use <code>{"{{tracked_link}}"}</code>. Every recipient gets a unique tracked redirect to this URL.</p></div></div>
+          <div className="formRow"><div><label>Tracked destination URL</label><input className="input" type="url" value={primaryLinkUrl} onChange={(e) => setPrimaryLinkUrl(e.target.value)} placeholder="https://www.earn-chat.com/" /><p className="formHelp">Required when the message uses <code>{"{{tracked_link}}"}</code>. Each contact gets a unique tracked redirect to this URL.</p></div></div>
           <div className="formRow formRowTwo">
             <div><label>Tracking</label><select className="select" value={trackingMode} onChange={(e) => setTrackingMode(e.target.value)}><option value="clicks_and_site">Clicks + site events</option><option value="clicks_only">Clicks only</option><option value="delivery_only">Delivery only</option></select></div>
             <div><label>Schedule</label><input className="input" type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div>
           </div>
           <div className="composerActions"><button className="button buttonPrimary" type="submit" disabled={saving}>{saving ? "Saving…" : "Save campaign"}</button>{message ? <span className="composerMessage">{message}</span> : null}{savedId ? <a className="button" href={`/campaigns/${savedId}`}>Open campaign</a> : null}</div>
-          <p className="formHelp">Tags are resolved separately for every recipient. Unknown tags are left visible instead of silently deleting content.</p>
+          <p className="formHelp">Message tags are converted to Resend Contact Properties at send time. <code>{"{{unsubscribe_url}}"}</code> uses Resend's managed Broadcast unsubscribe flow.</p>
         </form>
 
         <section className="panel previewPanel">
