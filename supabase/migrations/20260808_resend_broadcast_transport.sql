@@ -15,6 +15,7 @@ create table if not exists campaign_broadcast_waves (
   resend_segment_id text,
   resend_broadcast_id text,
   recipient_count integer not null default 0 check (recipient_count >= 0),
+  synced_count integer not null default 0 check (synced_count >= 0),
   status text not null default 'preparing' check (status in ('preparing','ready','sent','failed')),
   started_at timestamptz not null default now(),
   sent_at timestamptz,
@@ -23,8 +24,12 @@ create table if not exists campaign_broadcast_waves (
   unique(resend_broadcast_id)
 );
 
+alter table campaign_broadcast_waves
+  add column if not exists synced_count integer not null default 0;
+
 alter table campaign_recipients
-  add column if not exists broadcast_wave_id uuid references campaign_broadcast_waves(id) on delete set null;
+  add column if not exists broadcast_wave_id uuid references campaign_broadcast_waves(id) on delete set null,
+  add column if not exists resend_contact_synced_at timestamptz;
 
 create index if not exists idx_campaign_broadcast_waves_campaign
   on campaign_broadcast_waves(campaign_id, wave_no desc);
@@ -34,6 +39,9 @@ create index if not exists idx_campaign_broadcast_waves_resend
 
 create index if not exists idx_campaign_recipients_wave
   on campaign_recipients(broadcast_wave_id, contact_id);
+
+create index if not exists idx_campaign_recipients_wave_sync
+  on campaign_recipients(broadcast_wave_id, resend_contact_synced_at, id);
 
 create or replace function mail_reserve_broadcast_quota(requested integer)
 returns table (
