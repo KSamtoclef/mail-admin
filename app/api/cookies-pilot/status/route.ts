@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCookiesPilotStatus } from "@/lib/cookies-pilot";
+import { getCookiesPilotBrowserEndpoint, getCookiesPilotStatus } from "@/lib/cookies-pilot";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -7,6 +7,9 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const status = getCookiesPilotStatus();
+    const browserEndpoint = status.enabled && status.endpointConfigured
+      ? getCookiesPilotBrowserEndpoint()
+      : null;
     const supabase = getSupabaseAdmin() as any;
     const latest = await supabase
       .from("cookie_pilot_checks")
@@ -18,6 +21,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       ...status,
+      browserEndpoint,
       latest: latest.error ? null : (latest.data ?? null),
       auditReady: !latest.error,
       auditError: latest.error?.message ?? null
