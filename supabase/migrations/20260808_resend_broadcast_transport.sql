@@ -12,6 +12,7 @@ create table if not exists campaign_broadcast_waves (
   campaign_id uuid not null references campaigns(id) on delete cascade,
   wave_no integer not null,
   day_key date not null,
+  audience_offset_after integer,
   resend_segment_id text,
   resend_broadcast_id text,
   recipient_count integer not null default 0 check (recipient_count >= 0),
@@ -25,6 +26,7 @@ create table if not exists campaign_broadcast_waves (
 );
 
 alter table campaign_broadcast_waves
+  add column if not exists audience_offset_after integer,
   add column if not exists synced_count integer not null default 0;
 
 alter table campaign_recipients
