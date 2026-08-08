@@ -167,7 +167,7 @@ export async function syncContactToSegment(input: SyncContactInput) {
   return { included: true, created: false, unsubscribed: false };
 }
 
-export async function createAndSendBroadcast(input: {
+type BroadcastContentInput = {
   segmentId: string;
   name: string;
   fromName?: string | null;
@@ -175,15 +175,16 @@ export async function createAndSendBroadcast(input: {
   subject: string;
   html: string;
   text: string;
-}) {
+};
+
+export async function createBroadcastDraft(input: BroadcastContentInput) {
   const payload: Record<string, unknown> = {
     segment_id: input.segmentId,
     from: buildBroadcastFrom(input.fromName),
     name: input.name.slice(0, 160),
     subject: input.subject,
     html: input.html,
-    text: input.text,
-    send: true
+    text: input.text
   };
   if (input.replyTo) payload.reply_to = input.replyTo;
 
@@ -194,4 +195,12 @@ export async function createAndSendBroadcast(input: {
 
   if (!result.id) throw new Error("Resend did not return a Broadcast ID");
   return result.id;
+}
+
+export async function sendBroadcastDraft(broadcastId: string) {
+  const result = await request(`/broadcasts/${encodeURIComponent(broadcastId)}/send`, {
+    method: "POST",
+    body: JSON.stringify({})
+  }) as { id?: string };
+  return result.id ?? broadcastId;
 }
