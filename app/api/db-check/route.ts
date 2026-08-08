@@ -21,7 +21,7 @@ const checks: CheckSpec[] = [
   { name: "contact_imports", table: "contact_imports", columns: "id,filename,total_rows,valid_rows,unique_rows,added_rows,updated_rows,duplicate_rows,invalid_rows,created_at" },
   { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,transport,status,scheduled_at,primary_link_url,audience_cutoff_at,audience_offset,audience_total,dispatch_started_at,completed_at,send_confirmed_at,failed_reason,created_at" },
   { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,broadcast_wave_id,resend_contact_synced_at,delivery_status,provider_message_id,queued_at,attempt_count,last_error,sent_at,delivered_at,bounced_at,complained_at,unsubscribed_at" },
-  { name: "campaign_broadcast_waves", table: "campaign_broadcast_waves", columns: "id,campaign_id,wave_no,day_key,resend_segment_id,resend_broadcast_id,recipient_count,synced_count,status,started_at,sent_at,last_error" },
+  { name: "campaign_broadcast_waves", table: "campaign_broadcast_waves", columns: "id,campaign_id,wave_no,day_key,audience_offset_after,resend_segment_id,resend_broadcast_id,recipient_count,synced_count,status,started_at,sent_at,last_error" },
   { name: "tracked_links", table: "tracked_links", columns: "id,campaign_id,label,destination_url" },
   { name: "tracking_sites", table: "tracking_sites", columns: "id,name,site_url,origin,active,created_at,updated_at" },
   { name: "send_settings", table: "send_settings", columns: "id,daily_send_limit,max_batch_size,timezone,sending_paused,updated_at" },
@@ -53,7 +53,9 @@ export async function GET() {
     const transportRow = transportResult.data?.[0];
     const transportHealthy = !transportResult.error &&
       Boolean(transportRow?.reserve_function) &&
-      Boolean(transportRow?.release_function);
+      Boolean(transportRow?.release_function) &&
+      Boolean(transportRow?.ensure_wave_function) &&
+      Boolean(transportRow?.adjust_wave_function);
 
     const results: CheckResult[] = [
       ...tableResults,
@@ -66,7 +68,7 @@ export async function GET() {
       {
         name: "broadcast_quota_functions",
         ok: transportHealthy,
-        error: transportResult.error?.message ?? (transportHealthy ? null : "Broadcast quota functions are missing"),
+        error: transportResult.error?.message ?? (transportHealthy ? null : "Broadcast quota/checkpoint functions are missing"),
         code: transportResult.error?.code ?? null
       }
     ];
