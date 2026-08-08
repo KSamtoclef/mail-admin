@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 export async function GET() {
   const adminPassword = Boolean(process.env.ADMIN_PASSWORD);
   const adminSessionSecret = Boolean(process.env.ADMIN_SESSION_SECRET);
-  const supabase = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabaseServerKey = Boolean(process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY);
+  const supabase = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && supabaseServerKey);
   const provider = Boolean(process.env.EMAIL_PROVIDER && process.env.DEFAULT_FROM_EMAIL);
   const tracking = Boolean(process.env.TRACKING_BASE_URL && process.env.TRACKING_ALLOWED_ORIGINS);
 
@@ -16,6 +17,8 @@ export async function GET() {
       adminPassword,
       adminSessionSecret,
       supabase,
+      supabaseUrl: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
+      supabaseServerKey,
       provider,
       tracking
     },
