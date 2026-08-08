@@ -2,16 +2,16 @@
 
 import {
   Activity,
-  Cable,
-  ContactRound,
+  Database,
   LayoutDashboard,
-  LockKeyhole,
+  LogOut,
   MailPlus,
   MousePointerClick,
+  RefreshCw,
   Send,
   Settings,
-  ShieldCheck,
-  Upload
+  Upload,
+  UsersRound
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -31,6 +31,7 @@ type DashboardEvent = {
   region: string | null;
   page_url: string | null;
   device_type: string | null;
+  browser: string | null;
   contact_id: string | null;
   campaign_id: string | null;
   link_id: string | null;
@@ -84,6 +85,7 @@ type DashboardData = {
   metrics: {
     contacts: number;
     activeContacts: number;
+    missingUsernames: number;
     delivered: number;
     uniqueClickers: number;
     humanClicks: number;
@@ -106,6 +108,7 @@ const emptyData: DashboardData = {
   metrics: {
     contacts: 0,
     activeContacts: 0,
+    missingUsernames: 0,
     delivered: 0,
     uniqueClickers: 0,
     humanClicks: 0,
@@ -120,14 +123,14 @@ const emptyData: DashboardData = {
   events: []
 };
 
-const navItems: { id: View; label: string; icon: React.ElementType }[] = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "contacts", label: "Contacts", icon: ContactRound },
-  { id: "campaigns", label: "Campaigns", icon: Send },
-  { id: "composer", label: "Create Campaign", icon: MailPlus },
-  { id: "tracking", label: "Tracking", icon: MousePointerClick },
-  { id: "events", label: "Live Events", icon: Activity },
-  { id: "settings", label: "Connection Status", icon: Settings }
+const navItems: Array<{ id: View; label: string; icon: React.ElementType; group: "workspace" | "system" }> = [
+  { id: "overview", label: "Overview", icon: LayoutDashboard, group: "workspace" },
+  { id: "contacts", label: "Contacts", icon: UsersRound, group: "workspace" },
+  { id: "campaigns", label: "Campaigns", icon: Send, group: "workspace" },
+  { id: "composer", label: "New campaign", icon: MailPlus, group: "workspace" },
+  { id: "tracking", label: "Tracking", icon: MousePointerClick, group: "system" },
+  { id: "events", label: "Live events", icon: Activity, group: "system" },
+  { id: "settings", label: "Connections", icon: Settings, group: "system" }
 ];
 
 function one<T>(value: T | T[] | null | undefined): T | null {
@@ -135,20 +138,61 @@ function one<T>(value: T | T[] | null | undefined): T | null {
   return value ?? null;
 }
 
-function Header({ title, subtitle, actions }: { title: string; subtitle: string; actions?: React.ReactNode }) {
-  return <div className="topbar"><div><h1>{title}</h1><p className="subtitle">{subtitle}</p></div>{actions ? <div className="actions">{actions}</div> : null}</div>;
+function formatDate(value: string | null | undefined) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
 }
 
-function Metric({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
-  return <div className="card"><div className="metricLabel">{label}</div><div className="metricValue">{typeof value === "number" ? value.toLocaleString() : value}</div>{hint ? <div className="metricHint">{hint}</div> : null}</div>;
+function PageHeader({ title, description, actions }: { title: string; description: string; actions?: React.ReactNode }) {
+  return (
+    <header className="pageHeader">
+      <div>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {actions ? <div className="pageActions">{actions}</div> : null}
+    </header>
+  );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="note" style={{ padding: "22px 0" }}>{children}</div>;
+function Stat({ label, value, detail }: { label: string; value: number | string; detail?: string }) {
+  return (
+    <div className="stat">
+      <span className="statLabel">{label}</span>
+      <strong className="statValue">{typeof value === "number" ? value.toLocaleString() : value}</strong>
+      {detail ? <span className="statDetail">{detail}</span> : null}
+    </div>
+  );
 }
 
-function StatusRow({ icon, title, ready, readyText, waitingText }: { icon: React.ReactNode; title: string; ready: boolean; readyText: string; waitingText: string }) {
-  return <div className="event">{icon}<div><div className="eventTitle">{title}</div><div className="eventMeta">{ready ? readyText : waitingText}</div></div></div>;
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <div className="emptyState">{children}</div>;
+}
+
+function StatusItem({ label, ready, readyText, pendingText }: { label: string; ready: boolean; readyText: string; pendingText: string }) {
+  return (
+    <div className="statusItem">
+      <span className={`statusDot ${ready ? "statusDotReady" : "statusDotPending"}`} />
+      <div>
+        <div className="statusName">{label}</div>
+        <div className="statusText">{ready ? readyText : pendingText}</div>
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, meta, children }: { title: string; meta?: string; children: React.ReactNode }) {
+  return (
+    <section className="panel">
+      <div className="panelHeader">
+        <h2>{title}</h2>
+        {meta ? <span>{meta}</span> : null}
+      </div>
+      {children}
+    </section>
+  );
 }
 
 export default function Home() {
@@ -156,7 +200,7 @@ export default function Home() {
   const [data, setData] = useState<DashboardData>(emptyData);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [message, setMessage] = useState("");
+  const [campaignMessage, setCampaignMessage] = useState("");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importFile, setImportFile] = useState<File | null>(null);
@@ -196,13 +240,14 @@ export default function Home() {
 
   useEffect(() => {
     refresh(true);
-    const timer = window.setInterval(() => refresh(false), 10000);
+    const timer = window.setInterval(() => refresh(false), 15000);
     return () => window.clearInterval(timer);
   }, []);
 
+  const currentLabel = navItems.find((item) => item.id === view)?.label ?? "Overview";
   const clickEvents = useMemo(() => data.events.filter((event) => event.event_type === "email_link_click"), [data.events]);
-  const previewSubject = useMemo(() => (subject || "Your subject will appear here").replaceAll("{{first_name}}", "Recipient"), [subject]);
-  const previewBody = useMemo(() => (body || "Your message preview will appear here.").replaceAll("{{first_name}}", "Recipient").replaceAll("{{tracked_link}}", "[Tracked link]"), [body]);
+  const previewSubject = useMemo(() => (subject || "Subject preview").replaceAll("{{first_name}}", "Recipient"), [subject]);
+  const previewBody = useMemo(() => (body || "Your message will appear here.").replaceAll("{{first_name}}", "Recipient").replaceAll("{{tracked_link}}", "[Tracked link]"), [body]);
 
   async function importContacts() {
     if (!importFile || importing) return;
@@ -224,97 +269,150 @@ export default function Home() {
       }
 
       setImportResult(result.summary as ImportSummary);
-      setImportMessage("Import completed successfully.");
+      setImportMessage("Import complete");
       setImportFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await refresh(false);
     } catch {
-      setImportMessage("The import request failed before completion.");
+      setImportMessage("The import request did not complete.");
     } finally {
       setImporting(false);
     }
   }
 
   async function saveCampaign() {
-    setMessage("");
+    setCampaignMessage("");
+
     if (!name.trim() || !subject.trim() || !body.trim()) {
-      setMessage("Campaign name, subject and message are required.");
+      setCampaignMessage("Campaign name, subject and message are required.");
       return;
     }
 
-    const response = await fetch("/api/campaigns", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name,
-        subject,
-        from_name: fromName || null,
-        reply_to: replyTo || null,
-        text_body: body,
-        tracking_mode: trackingMode,
-        scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null
-      })
-    });
+    try {
+      const response = await fetch("/api/campaigns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          subject,
+          from_name: fromName || null,
+          reply_to: replyTo || null,
+          text_body: body,
+          tracking_mode: trackingMode,
+          scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null
+        })
+      });
 
-    const result = await response.json();
-    if (!response.ok) {
-      setMessage(result.error ?? "Unable to save campaign.");
-      return;
+      const result = await response.json();
+      if (!response.ok) {
+        setCampaignMessage(result.error ?? "Unable to save campaign.");
+        return;
+      }
+
+      setCampaignMessage(result.campaign?.status === "scheduled" ? "Campaign scheduled" : "Draft saved");
+      await refresh(false);
+    } catch {
+      setCampaignMessage("The campaign request did not complete.");
     }
-
-    setMessage(result.campaign?.status === "scheduled" ? "Campaign scheduled." : "Draft saved.");
-    await refresh(false);
   }
 
-  const updatedText = lastUpdated ? `Updated ${lastUpdated.toLocaleTimeString()}` : "Waiting for first refresh";
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      window.location.href = "/login";
+    }
+  }
+
+  const updatedText = lastUpdated ? `Last sync ${lastUpdated.toLocaleTimeString()}` : loading ? "Loading" : "Not synced";
 
   return (
-    <div className="shell">
+    <div className="appShell">
       <aside className="sidebar">
-        <div className="brand">Mail <span>Admin</span></div>
-        <nav className="nav">
-          {navItems.map(({ id, label, icon: Icon }) => (
-            <button key={id} className={`navButton ${view === id ? "navButtonActive" : ""}`} onClick={() => setView(id)}><Icon size={17} />{label}</button>
+        <div className="brandBlock">
+          <div className="brandMark">M</div>
+          <div>
+            <div className="brandName">Mail Admin</div>
+            <div className="brandMeta">Campaign operations</div>
+          </div>
+        </div>
+
+        <div className="navGroup">
+          <div className="navLabel">Workspace</div>
+          {navItems.filter((item) => item.group === "workspace").map(({ id, label, icon: Icon }) => (
+            <button key={id} className={`navItem ${view === id ? "navItemActive" : ""}`} onClick={() => setView(id)}>
+              <Icon size={17} strokeWidth={1.8} />
+              <span>{label}</span>
+            </button>
           ))}
-        </nav>
+        </div>
+
+        <div className="navGroup">
+          <div className="navLabel">System</div>
+          {navItems.filter((item) => item.group === "system").map(({ id, label, icon: Icon }) => (
+            <button key={id} className={`navItem ${view === id ? "navItemActive" : ""}`} onClick={() => setView(id)}>
+              <Icon size={17} strokeWidth={1.8} />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="sidebarFooter">
+          <div className="serviceLine">
+            <span className={`statusDot ${data.connected ? "statusDotReady" : "statusDotPending"}`} />
+            <span>{data.connected ? "Database online" : "Database unavailable"}</span>
+          </div>
+          <button className="logoutButton" onClick={logout}><LogOut size={16} /> Sign out</button>
+        </div>
       </aside>
 
-      <main className="main">
-        {!loading && !data.connected && (
-          <section className="card" style={{ marginBottom: 16, borderColor: "#6b4f1d" }}>
-            <div className="event"><Cable className="warn" size={18} /><div><div className="eventTitle">Supabase is not fully ready</div><div className="eventMeta">No fake data is shown. If your health check says Supabase is configured, run the latest SQL migration in Supabase so the dashboard can read every required table and column.</div></div></div>
+      <main className="workspace">
+        <div className="workspaceBar">
+          <div className="breadcrumb"><span>Mail Admin</span><b>/</b><strong>{currentLabel}</strong></div>
+          <div className="syncState"><span className={loading ? "syncPulse" : ""} />{updatedText}</div>
+        </div>
+
+        {!loading && !data.connected ? (
+          <div className="notice noticeWarning">
+            <Database size={17} />
+            <div><strong>Database check failed</strong><span>{data.error || "Check the Supabase connection and latest migration."}</span></div>
+          </div>
+        ) : null}
+
+        {data.error && data.connected ? (
+          <div className="notice noticeError"><strong>Dashboard error</strong><span>{data.error}</span></div>
+        ) : null}
+
+        {view === "overview" ? <>
+          <PageHeader title="Overview" description="Campaign delivery and website activity." actions={<button className="button" onClick={() => refresh(true)}><RefreshCw size={15} /> Refresh</button>} />
+
+          <section className="statsBar">
+            <Stat label="Contacts" value={data.metrics.contacts} detail={`${data.metrics.activeContacts.toLocaleString()} active`} />
+            <Stat label="Delivered" value={data.metrics.delivered} detail="Provider confirmed" />
+            <Stat label="Unique clickers" value={data.metrics.uniqueClickers} detail="Human clicks" />
+            <Stat label="Attributed sessions" value={data.metrics.attributedSessions} detail="Email to site" />
           </section>
-        )}
 
-        {data.error ? <section className="card" style={{ marginBottom: 16, borderColor: "#7f1d1d" }}><div className="eventTitle danger">Connection error</div><div className="eventMeta">{data.error}</div></section> : null}
+          <div className="contentGrid contentGridWide">
+            <Panel title="Recent campaigns" meta={`${data.campaigns.length} shown`}>
+              {data.campaigns.length ? <div className="tableWrap"><table><thead><tr><th>Campaign</th><th>Status</th><th>Created</th></tr></thead><tbody>{data.campaigns.map((row) => <tr key={row.id}><td className="primaryCell">{row.name}</td><td><span className={`stateTag state-${row.status}`}>{row.status}</span></td><td>{formatDate(row.created_at)}</td></tr>)}</tbody></table></div> : <EmptyState>No campaigns yet.</EmptyState>}
+            </Panel>
 
-        {view === "overview" && <>
-          <Header title="Overview" subtitle={`Live campaign and website intelligence · ${updatedText}`} actions={<button className="button" onClick={() => refresh(true)}>Refresh now</button>} />
-          <div className="grid4">
-            <Metric label="Total Contacts" value={data.metrics.contacts} hint={`${data.metrics.activeContacts.toLocaleString()} active`} />
-            <Metric label="Delivered" value={data.metrics.delivered} hint="provider-confirmed" />
-            <Metric label="Unique Clickers" value={data.metrics.uniqueClickers} hint="human email clicks" />
-            <Metric label="Attributed Sessions" value={data.metrics.attributedSessions} hint="email → website" />
+            <Panel title="Infrastructure">
+              <div className="statusList">
+                <StatusItem label="Admin access" ready={Boolean(data.authConfigured)} readyText="Protected" pendingText="Not configured" />
+                <StatusItem label="Supabase" ready={data.connected} readyText="Connected" pendingText="Connection required" />
+                <StatusItem label="Website tracker" ready={Boolean(data.trackingConfigured)} readyText="Configured" pendingText="Waiting for site origin" />
+                <StatusItem label="Email provider" ready={Boolean(data.providerConfigured)} readyText="Configured" pendingText="Not connected" />
+              </div>
+            </Panel>
           </div>
-          <div className="twoCol">
-            <section className="card">
-              <h3 className="sectionTitle">Recent campaigns</h3>
-              {data.campaigns.length ? <table><thead><tr><th>Name</th><th>Status</th><th>Created</th></tr></thead><tbody>{data.campaigns.map((row) => <tr key={row.id}><td>{row.name}</td><td><span className="badge">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString()}</td></tr>)}</tbody></table> : <Empty>No campaigns yet.</Empty>}
-            </section>
-            <section className="card">
-              <h3 className="sectionTitle">System readiness</h3>
-              <StatusRow icon={<LockKeyhole className={data.authConfigured ? "good" : "warn"} size={18} />} title="Admin protection" ready={Boolean(data.authConfigured)} readyText="Password protection configured" waitingText="Add ADMIN_PASSWORD + ADMIN_SESSION_SECRET" />
-              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase" ready={data.connected} readyText="Database connected and readable" waitingText="Waiting for credentials/schema migration" />
-              <StatusRow icon={<MousePointerClick className={data.trackingConfigured ? "good" : "warn"} size={18} />} title="Website tracking" ready={Boolean(data.trackingConfigured)} readyText="Tracking URL and origins configured" waitingText="Add tracking URL and allowed website origin" />
-              <StatusRow icon={<Cable className={data.providerConfigured ? "good" : "warn"} size={18} />} title="Email provider" ready={Boolean(data.providerConfigured)} readyText="Base email provider settings detected" waitingText="Connect your reseller/email API later" />
-            </section>
-          </div>
-        </>}
+        </> : null}
 
-        {view === "contacts" && <>
-          <Header
+        {view === "contacts" ? <>
+          <PageHeader
             title="Contacts"
-            subtitle="Import, deduplicate and audit your real mailing list."
+            description="Upload and maintain recipient records."
             actions={<>
               <input
                 ref={fileInputRef}
@@ -327,119 +425,148 @@ export default function Home() {
                   setImportResult(null);
                 }}
               />
-              <button className="button" onClick={() => fileInputRef.current?.click()}><Upload size={16} />{importFile ? "Change CSV" : "Choose CSV"}</button>
-              <button className="button buttonPrimary" disabled={!importFile || importing || !data.connected} onClick={importContacts}>{importing ? "Importing…" : "Import Contacts"}</button>
+              <button className="button" onClick={() => fileInputRef.current?.click()}><Upload size={15} /> {importFile ? "Change file" : "Choose CSV"}</button>
+              <button className="button buttonPrimary" disabled={!importFile || importing || !data.connected} onClick={importContacts}>{importing ? "Importing…" : "Import"}</button>
             </>}
           />
 
-          <div className="grid4" style={{ marginBottom: 12 }}>
-            <Metric label="All Contacts" value={data.metrics.contacts} />
-            <Metric label="Active" value={data.metrics.activeContacts} />
-            <Metric label="Recent Rows" value={data.contacts.length} hint="latest loaded" />
-            <Metric label="Database" value={data.connected ? "Connected" : "Offline"} />
-          </div>
+          <section className="statsBar">
+            <Stat label="All contacts" value={data.metrics.contacts} />
+            <Stat label="Active" value={data.metrics.activeContacts} />
+            <Stat label="Missing usernames" value={data.metrics.missingUsernames} detail="Should remain 0" />
+            <Stat label="Email uniqueness" value="Enforced" detail="Database constraint" />
+          </section>
 
-          <section className="card" style={{ marginBottom: 12 }}>
-            <h3 className="sectionTitle">CSV import</h3>
-            <p className="note">Expected columns: <strong>user_id, session_id, username, email</strong>. Emails are compared case-insensitively. Duplicate rows in the file are collapsed before the database write, and an existing email is updated instead of duplicated.</p>
-            <div className="event">
-              <Upload size={18} className={importFile ? "good" : "warn"} />
-              <div><div className="eventTitle">{importFile ? importFile.name : "No CSV selected"}</div><div className="eventMeta">{importFile ? `${(importFile.size / 1024 / 1024).toFixed(2)} MB · ready to import` : "Choose your cleaned master CSV above."}</div></div>
+          <Panel title="CSV import" meta={importFile ? importFile.name : "No file selected"}>
+            <div className="importLayout">
+              <div>
+                <p className="bodyText">Accepted columns: <code>user_id</code>, <code>session_id</code>, <code>username</code>, <code>email</code>. Email matching is case-insensitive and existing records are merged without blank values overwriting stored IDs.</p>
+                <div className="fileLine">
+                  <Upload size={17} />
+                  <div><strong>{importFile ? importFile.name : "Choose a CSV to begin"}</strong><span>{importFile ? `${(importFile.size / 1024 / 1024).toFixed(2)} MB` : "Maximum file size: 8 MB"}</span></div>
+                </div>
+                {importMessage ? <div className={`inlineMessage ${importResult ? "inlineMessageSuccess" : "inlineMessageError"}`}>{importMessage}</div> : null}
+              </div>
+
+              {importResult ? <div className="importSummary">
+                <div><span>Rows</span><strong>{importResult.totalRows.toLocaleString()}</strong></div>
+                <div><span>Unique valid</span><strong>{importResult.uniqueRows.toLocaleString()}</strong></div>
+                <div><span>Added</span><strong>{importResult.addedRows.toLocaleString()}</strong></div>
+                <div><span>Existing</span><strong>{importResult.updatedRows.toLocaleString()}</strong></div>
+                <div><span>CSV duplicates</span><strong>{importResult.duplicateRows.toLocaleString()}</strong></div>
+                <div><span>Rejected</span><strong>{importResult.invalidRows.toLocaleString()}</strong></div>
+              </div> : <div className="importSummary importSummaryEmpty"><span>Import results will appear here.</span></div>}
             </div>
-            {importMessage ? <p className={`note ${importResult ? "good" : "danger"}`}>{importMessage}</p> : null}
-          </section>
+          </Panel>
 
-          {importResult ? <>
-            <div className="grid4" style={{ marginBottom: 12 }}>
-              <Metric label="Rows in CSV" value={importResult.totalRows} />
-              <Metric label="Unique Valid" value={importResult.uniqueRows} />
-              <Metric label="Newly Added" value={importResult.addedRows} />
-              <Metric label="Already Existing" value={importResult.updatedRows} />
-            </div>
-            <section className="card" style={{ marginBottom: 12 }}>
-              <div className="eventTitle">Import verified</div>
-              <div className="eventMeta">{importResult.duplicateRows.toLocaleString()} duplicate row(s) inside the CSV were collapsed · {importResult.invalidRows.toLocaleString()} invalid/missing row(s) were rejected · database now contains {importResult.totalContactsAfterImport.toLocaleString()} contact(s).</div>
+          <Panel title="Recent contacts" meta={`${data.contacts.length} shown`}>
+            {data.contacts.length ? <div className="tableWrap"><table><thead><tr><th>User ID</th><th>Session ID</th><th>Username</th><th>Email</th><th>Status</th></tr></thead><tbody>{data.contacts.map((row) => <tr key={row.id}><td className="monoCell" title={row.external_user_id || ""}>{row.external_user_id || "—"}</td><td className="monoCell" title={row.external_session_id || ""}>{row.external_session_id || "—"}</td><td>{row.username || "—"}</td><td className="primaryCell">{row.email}</td><td><span className={`stateTag state-${row.status}`}>{row.status}</span></td></tr>)}</tbody></table></div> : <EmptyState>No contacts in the database.</EmptyState>}
+          </Panel>
+
+          <Panel title="Import history" meta={`${data.imports.length} recent imports`}>
+            {data.imports.length ? <div className="tableWrap"><table><thead><tr><th>File</th><th>Added</th><th>Existing</th><th>CSV duplicates</th><th>Rejected</th><th>Imported</th></tr></thead><tbody>{data.imports.map((row) => <tr key={row.id}><td className="primaryCell">{row.filename}</td><td>{row.added_rows.toLocaleString()}</td><td>{row.updated_rows.toLocaleString()}</td><td>{row.duplicate_rows.toLocaleString()}</td><td>{row.invalid_rows.toLocaleString()}</td><td>{formatDate(row.created_at)}</td></tr>)}</tbody></table></div> : <EmptyState>No imports recorded.</EmptyState>}
+          </Panel>
+        </> : null}
+
+        {view === "campaigns" ? <>
+          <PageHeader title="Campaigns" description="Drafts and scheduled sends." actions={<button className="button buttonPrimary" onClick={() => setView("composer")}><MailPlus size={15} /> New campaign</button>} />
+          <Panel title="Campaign list" meta={`${data.campaigns.length} shown`}>
+            {data.campaigns.length ? <div className="tableWrap"><table><thead><tr><th>Campaign</th><th>Status</th><th>Created</th><th>Scheduled</th></tr></thead><tbody>{data.campaigns.map((row) => <tr key={row.id}><td className="primaryCell">{row.name}</td><td><span className={`stateTag state-${row.status}`}>{row.status}</span></td><td>{formatDate(row.created_at)}</td><td>{formatDate(row.scheduled_at)}</td></tr>)}</tbody></table></div> : <EmptyState>No campaigns saved.</EmptyState>}
+          </Panel>
+        </> : null}
+
+        {view === "composer" ? <>
+          <PageHeader title="New campaign" description="Write and schedule a campaign." actions={<button className="button buttonPrimary" onClick={saveCampaign}>Save campaign</button>} />
+          {campaignMessage ? <div className="inlineMessage pageMessage">{campaignMessage}</div> : null}
+          <div className="editorGrid">
+            <section className="panel editorPanel">
+              <div className="formRow">
+                <div><label>Campaign name</label><input className="input" value={name} onChange={(event) => setName(event.target.value)} placeholder="August update" /></div>
+              </div>
+              <div className="formRow formRowTwo">
+                <div><label>From name</label><input className="input" value={fromName} onChange={(event) => setFromName(event.target.value)} placeholder="Your team" /></div>
+                <div><label>Reply-to</label><input className="input" value={replyTo} onChange={(event) => setReplyTo(event.target.value)} placeholder="reply@example.com" /></div>
+              </div>
+              <div className="formRow"><div><label>Subject</label><input className="input" value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Campaign subject" /></div></div>
+              <div className="formRow"><div><label>Message</label><textarea className="textarea" value={body} onChange={(event) => setBody(event.target.value)} placeholder={'Use {{first_name}} and {{tracked_link}} where needed.'} /></div></div>
+              <div className="formRow formRowTwo">
+                <div><label>Tracking</label><select className="select" value={trackingMode} onChange={(event) => setTrackingMode(event.target.value)}><option value="clicks_and_site">Clicks + site events</option><option value="clicks_only">Clicks only</option><option value="delivery_only">Delivery only</option></select></div>
+                <div><label>Schedule</label><input className="input" type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} /></div>
+              </div>
+              <p className="formHelp">Sending stays disabled until the email provider adapter is connected. Drafts and schedules are stored in Supabase.</p>
             </section>
-          </> : null}
 
-          <section className="card" style={{ marginBottom: 12 }}>
-            <h3 className="sectionTitle">Recent contacts</h3>
-            {data.contacts.length ? <table><thead><tr><th>User ID</th><th>Session ID</th><th>Username</th><th>Email</th><th>Status</th></tr></thead><tbody>{data.contacts.map((row) => <tr key={row.id}><td>{row.external_user_id || "—"}</td><td>{row.external_session_id || "—"}</td><td>{row.username || "—"}</td><td>{row.email}</td><td><span className="badge">{row.status}</span></td></tr>)}</tbody></table> : <Empty>No contacts yet. Choose your cleaned master CSV and import it above.</Empty>}
-          </section>
-
-          <section className="card">
-            <h3 className="sectionTitle">Import history</h3>
-            {data.imports.length ? <table><thead><tr><th>File</th><th>Added</th><th>Existing</th><th>CSV duplicates</th><th>Rejected</th><th>Time</th></tr></thead><tbody>{data.imports.map((row) => <tr key={row.id}><td>{row.filename}</td><td>{row.added_rows.toLocaleString()}</td><td>{row.updated_rows.toLocaleString()}</td><td>{row.duplicate_rows.toLocaleString()}</td><td>{row.invalid_rows.toLocaleString()}</td><td>{new Date(row.created_at).toLocaleString()}</td></tr>)}</tbody></table> : <Empty>No imports recorded yet.</Empty>}
-          </section>
-        </>}
-
-        {view === "campaigns" && <>
-          <Header title="Campaigns" subtitle="Saved and scheduled campaigns from your database." actions={<button className="button buttonPrimary" onClick={() => setView("composer")}>Create Campaign</button>} />
-          <section className="card">{data.campaigns.length ? <table><thead><tr><th>Name</th><th>Status</th><th>Created</th><th>Scheduled</th></tr></thead><tbody>{data.campaigns.map((row) => <tr key={row.id}><td>{row.name}</td><td><span className="badge">{row.status}</span></td><td>{new Date(row.created_at).toLocaleString()}</td><td>{row.scheduled_at ? new Date(row.scheduled_at).toLocaleString() : "—"}</td></tr>)}</tbody></table> : <Empty>No campaigns have been created.</Empty>}</section>
-        </>}
-
-        {view === "composer" && <>
-          <Header title="Create Campaign" subtitle="Create a real database draft now; sending activates when your email API adapter is connected." actions={<button className="button buttonPrimary" onClick={saveCampaign}>Save Campaign</button>} />
-          {message ? <section className="card" style={{ marginBottom: 12 }}><div className="eventTitle">{message}</div></section> : null}
-          <div className="composer">
-            <section className="card">
-              <label className="label">Campaign name</label><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. August Update" />
-              <div className="formGrid"><div><label className="label">From name</label><input className="input" value={fromName} onChange={(e) => setFromName(e.target.value)} placeholder="Your brand/team name" /></div><div><label className="label">Reply-to</label><input className="input" value={replyTo} onChange={(e) => setReplyTo(e.target.value)} placeholder="reply@example.com" /></div></div>
-              <label className="label">Subject</label><input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject line" />
-              <label className="label">Email body</label><textarea className="textarea" value={body} onChange={(e) => setBody(e.target.value)} placeholder={'Use {{first_name}} and {{tracked_link}} where needed.'} />
-              <div className="formGrid"><div><label className="label">Tracking mode</label><select className="select" value={trackingMode} onChange={(e) => setTrackingMode(e.target.value)}><option value="clicks_and_site">Clicks + site events</option><option value="clicks_only">Clicks only</option><option value="delivery_only">Delivery only</option></select></div><div><label className="label">Schedule (optional)</label><input className="input" type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} /></div></div>
-              <p className="note">The email API key will remain server-side. Recipient tracking links will be generated when the sending adapter is connected.</p>
+            <section className="panel previewPanel">
+              <div className="panelHeader"><h2>Preview</h2><span>Recipient view</span></div>
+              <div className="emailPreview"><h3>{previewSubject}</h3>{previewBody.split("\n").map((line, index) => <p key={index}>{line || <>&nbsp;</>}</p>)}</div>
             </section>
-            <section className="card"><h3 className="sectionTitle">Preview</h3><div className="preview"><h2>{previewSubject}</h2>{previewBody.split("\n").map((line, index) => <p key={index}>{line || <>&nbsp;</>}</p>)}</div></section>
           </div>
-        </>}
+        </> : null}
 
-        {view === "tracking" && <>
-          <Header title="Tracking" subtitle={`Email click attribution, scanner filtering and site sessions · ${updatedText}`} actions={<button className="button" onClick={() => refresh(false)}>Refresh</button>} />
-          <div className="grid4">
-            <Metric label="Unique Clickers" value={data.metrics.uniqueClickers} hint="unique known contacts" />
-            <Metric label="Human Clicks" value={data.metrics.humanClicks} hint="scanner-filtered" />
-            <Metric label="Scanner/Bot Clicks" value={data.metrics.botClicks} hint="kept separate" />
-            <Metric label="Attributed Sessions" value={data.metrics.attributedSessions} hint="email-linked visits" />
-          </div>
-          <div className="grid4" style={{ marginTop: 12 }}>
-            <Metric label="Anonymous Sessions" value={data.metrics.anonymousSessions} hint="non-email/direct visits" />
-            <Metric label="Total Events" value={data.metrics.totalEvents} />
-            <Metric label="Recent Click Rows" value={clickEvents.length} />
-            <Metric label="Database" value={data.connected ? "Connected" : "Offline"} />
-          </div>
-          <section className="card" style={{ marginTop: 12 }}>
-            <h3 className="sectionTitle">Recent email link clicks</h3>
-            {clickEvents.length ? <table><thead><tr><th>Recipient</th><th>Campaign</th><th>Link</th><th>Device</th><th>Approx. region</th><th>Type</th><th>Time</th></tr></thead><tbody>{clickEvents.map((event) => {
+        {view === "tracking" ? <>
+          <PageHeader title="Tracking" description="Email click attribution and website sessions." actions={<button className="button" onClick={() => refresh(false)}><RefreshCw size={15} /> Refresh</button>} />
+          <section className="statsBar">
+            <Stat label="Unique clickers" value={data.metrics.uniqueClickers} />
+            <Stat label="Human clicks" value={data.metrics.humanClicks} />
+            <Stat label="Scanner clicks" value={data.metrics.botClicks} />
+            <Stat label="Attributed sessions" value={data.metrics.attributedSessions} />
+          </section>
+          <section className="statsBar statsBarSecondary">
+            <Stat label="Anonymous sessions" value={data.metrics.anonymousSessions} />
+            <Stat label="Total events" value={data.metrics.totalEvents} />
+            <Stat label="Recent click rows" value={clickEvents.length} />
+            <Stat label="Tracker" value={data.trackingConfigured ? "Ready" : "Pending"} />
+          </section>
+
+          <Panel title="Recent email clicks" meta={`${clickEvents.length} shown`}>
+            {clickEvents.length ? <div className="tableWrap"><table><thead><tr><th>Recipient</th><th>Campaign</th><th>Link</th><th>Client</th><th>Region</th><th>Classification</th><th>Time</th></tr></thead><tbody>{clickEvents.map((event) => {
               const contact = one(event.contact);
               const campaign = one(event.campaign);
               const link = one(event.link);
-              return <tr key={event.id}><td>{contact?.email || event.contact_id || "Unknown"}</td><td>{campaign?.name || event.campaign_id || "—"}</td><td>{link?.label || link?.destination_url || event.page_url || "—"}</td><td>{event.device_type || "—"}</td><td>{[event.region, event.country_code].filter(Boolean).join(", ") || "—"}</td><td><span className={`badge ${event.is_bot ? "warn" : "good"}`}>{event.is_bot ? "Scanner/Bot" : "Human"}</span></td><td>{new Date(event.occurred_at).toLocaleString()}</td></tr>;
-            })}</tbody></table> : <Empty>No email clicks yet.</Empty>}
-          </section>
-        </>}
+              const client = [event.device_type, event.browser].filter(Boolean).join(" / ") || "—";
+              return <tr key={event.id}><td className="primaryCell">{contact?.email || event.contact_id || "Unknown"}</td><td>{campaign?.name || "—"}</td><td>{link?.label || link?.destination_url || event.page_url || "—"}</td><td>{client}</td><td>{[event.region, event.country_code].filter(Boolean).join(", ") || "—"}</td><td><span className={`stateTag ${event.is_bot ? "state-scanner" : "state-human"}`}>{event.is_bot ? "Scanner" : "Human"}</span></td><td>{formatDate(event.occurred_at)}</td></tr>;
+            })}</tbody></table></div> : <EmptyState>No tracked email clicks yet.</EmptyState>}
+          </Panel>
+        </> : null}
 
-        {view === "events" && <>
-          <Header title="Live Events" subtitle={`Auto-refreshes every 10 seconds · ${updatedText}`} actions={<button className="button" onClick={() => refresh(false)}>Refresh now</button>} />
-          <section className="card">{data.events.length ? data.events.map((event) => {
-            const contact = one(event.contact);
-            const campaign = one(event.campaign);
-            return <div className="event" key={event.id}><span className="eventDot" /><div><div className="eventTitle">{event.event_type}{event.is_bot ? " · scanner/bot" : ""}{contact?.email ? ` · ${contact.email}` : ""}</div><div className="eventMeta">{campaign?.name ? `${campaign.name} · ` : ""}{event.page_url || "No page URL"} · {[event.region, event.country_code].filter(Boolean).join(", ") || "Location unavailable"} · {new Date(event.occurred_at).toLocaleString()}</div></div></div>;
-          }) : <Empty>No events recorded yet.</Empty>}</section>
-        </>}
+        {view === "events" ? <>
+          <PageHeader title="Live events" description="Newest events from the website tracker." actions={<button className="button" onClick={() => refresh(false)}><RefreshCw size={15} /> Refresh</button>} />
+          <Panel title="Event stream" meta="Refreshes every 15 seconds">
+            {data.events.length ? <div className="eventList">{data.events.map((event) => {
+              const contact = one(event.contact);
+              const campaign = one(event.campaign);
+              return <div className="eventRow" key={event.id}><span className={`eventMarker ${event.is_bot ? "eventMarkerBot" : ""}`} /><div className="eventMain"><div className="eventName">{event.event_type.replaceAll("_", " ")}</div><div className="eventContext">{contact?.email || "Anonymous visitor"}{campaign?.name ? ` · ${campaign.name}` : ""}{event.page_url ? ` · ${event.page_url}` : ""}</div></div><div className="eventSide"><span>{[event.region, event.country_code].filter(Boolean).join(", ") || "—"}</span><time>{formatDate(event.occurred_at)}</time></div></div>;
+            })}</div> : <EmptyState>No tracking events yet.</EmptyState>}
+          </Panel>
+        </> : null}
 
-        {view === "settings" && <>
-          <Header title="Connection Status" subtitle="A connection turns green only when the required server configuration is detected." actions={<button className="button" onClick={() => refresh(false)}>Re-check</button>} />
-          <div className="twoCol">
-            <section className="card"><h3 className="sectionTitle">Required connections</h3>
-              <StatusRow icon={<LockKeyhole className={data.authConfigured ? "good" : "warn"} size={18} />} title="Admin protection" ready={Boolean(data.authConfigured)} readyText="Configured" waitingText="Add ADMIN_PASSWORD and ADMIN_SESSION_SECRET in Vercel" />
-              <StatusRow icon={<ShieldCheck className={data.connected ? "good" : "warn"} size={18} />} title="Supabase database" ready={data.connected} readyText="Connected and readable" waitingText="Add credentials and run the latest schema/migration" />
-              <StatusRow icon={<MousePointerClick className={data.trackingConfigured ? "good" : "warn"} size={18} />} title="Website tracker" ready={Boolean(data.trackingConfigured)} readyText="Base URL and allowed origin configured" waitingText="Add TRACKING_BASE_URL and TRACKING_ALLOWED_ORIGINS" />
-              <StatusRow icon={<Cable className={data.providerConfigured ? "good" : "warn"} size={18} />} title="Email API" ready={Boolean(data.providerConfigured)} readyText="Base provider configuration detected" waitingText="Connect your email/reseller API when ready" />
-            </section>
-            <section className="card"><h3 className="sectionTitle">What is already built</h3><p className="note">Admin login, database-backed campaigns, reusable contact imports with audit history, unique recipient click redirects, human-vs-scanner click classification, attributed email sessions, anonymous website sessions, page/action events, approximate country/region metadata, CORS allow-listing and live dashboard polling are already in the codebase.</p><p className="note">Precise GPS is not collected automatically. Exact location requires explicit browser permission. Do not send passwords, payment details or private form contents as tracking metadata.</p></section>
+        {view === "settings" ? <>
+          <PageHeader title="Connections" description="Environment and service status." actions={<button className="button" onClick={() => refresh(false)}><RefreshCw size={15} /> Re-check</button>} />
+          <div className="contentGrid">
+            <Panel title="Services">
+              <div className="statusList">
+                <StatusItem label="Admin access" ready={Boolean(data.authConfigured)} readyText="Password protection active" pendingText="ADMIN_PASSWORD and ADMIN_SESSION_SECRET required" />
+                <StatusItem label="Supabase" ready={data.connected} readyText="Connected and readable" pendingText="Database connection required" />
+                <StatusItem label="Website tracker" ready={Boolean(data.trackingConfigured)} readyText="Base URL and origin allow-list active" pendingText="TRACKING_BASE_URL and TRACKING_ALLOWED_ORIGINS required" />
+                <StatusItem label="Email provider" ready={Boolean(data.providerConfigured)} readyText="Provider configuration detected" pendingText="Provider adapter not connected" />
+              </div>
+            </Panel>
+
+            <Panel title="Data integrity">
+              <div className="integrityList">
+                <div><span>Email uniqueness</span><strong>Enforced</strong></div>
+                <div><span>Missing usernames</span><strong className={data.metrics.missingUsernames === 0 ? "textGood" : "textWarn"}>{data.metrics.missingUsernames.toLocaleString()}</strong></div>
+                <div><span>Import audit</span><strong>{data.imports.length ? "Active" : "No imports yet"}</strong></div>
+                <div><span>Admin session</span><strong>HTTP-only cookie</strong></div>
+              </div>
+            </Panel>
           </div>
-        </>}
+
+          <Panel title="Tracking install" meta="Use after the destination website origin is configured">
+            <pre className="codeBlock">{`<script\n  src="https://mail-admin-six.vercel.app/mail-tracker.js"\n  data-endpoint="https://mail-admin-six.vercel.app/api/events"\n  defer\n></script>`}</pre>
+            <p className="formHelp">The tracker records sessions, page views and explicitly marked actions. Location remains approximate at country/region level.</p>
+          </Panel>
+        </> : null}
       </main>
     </div>
   );
