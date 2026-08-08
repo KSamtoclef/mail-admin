@@ -9,6 +9,7 @@ const checks = [
   { name: "campaigns", table: "campaigns", columns: "id,name,subject,from_name,reply_to,text_body,tracking_mode,status,scheduled_at,created_at" },
   { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,delivery_status,delivered_at" },
   { name: "tracked_links", table: "tracked_links", columns: "id,campaign_id,label,destination_url" },
+  { name: "tracking_sites", table: "tracking_sites", columns: "id,name,site_url,origin,active,created_at,updated_at" },
   { name: "sessions", table: "sessions", columns: "id,contact_id,campaign_id,recipient_id,anonymous_id,last_seen_at,country_code,region,device_type,browser,os" },
   { name: "events", table: "events", columns: "id,event_type,occurred_at,is_bot,bot_reason,country_code,region,device_type,browser,contact_id,campaign_id,recipient_id,session_id,link_id" },
   { name: "suppression_list", table: "suppression_list", columns: "id,email_normalized,reason,created_at" },
