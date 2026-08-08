@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { trackingIsConfigured } from "@/lib/tracking-security";
+import { getTrackingBaseUrl, trackingIsConfigured } from "@/lib/tracking-security";
 
 function hasSupabaseConfig() {
   return Boolean(
@@ -27,7 +27,7 @@ const noStoreHeaders = { "Cache-Control": "no-store" };
 export async function GET() {
   const providerConfigured = Boolean(process.env.EMAIL_PROVIDER && process.env.DEFAULT_FROM_EMAIL);
   const trackingConfigured = trackingIsConfigured();
-  const trackingBaseUrl = process.env.TRACKING_BASE_URL?.replace(/\/$/, "") ?? null;
+  const trackingBaseUrl = getTrackingBaseUrl();
   const authConfigured = Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET);
 
   if (!hasSupabaseConfig()) {
@@ -105,8 +105,6 @@ export async function GET() {
     recordWarning("import history", imports.error);
     recordWarning("event feed", events.error);
 
-    // A readable contacts table is enough to prove the database connection itself is live.
-    // Optional analytics tables can fail independently without wiping the whole workspace.
     const connected = !contactsCount.error;
 
     if (!connected) {
