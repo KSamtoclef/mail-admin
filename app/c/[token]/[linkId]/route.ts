@@ -19,27 +19,50 @@ export async function GET(
 
   const token = parsedToken.data;
   const linkId = parsedLinkId.data;
-  const supabase = getSupabaseAdmin();
+  const supabase = getSupabaseAdmin() as any;
 
-  const { data: recipient, error: recipientError } = await supabase
+  const { data: link, error: linkError } = await supabase
+    .from("tracked_links")
+    .select("id,campaign_id,destination_url")
+    .eq("id", linkId)
+    .maybeSingle();
+
+  if (linkError || !link || !validHttpDestination(link.destination_url)) {
+    return NextResponse.json({ ok: false, error: "Campaign link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
+
+  let recipient: { id: string; campaign_id: string; contact_id: string } | null = null;
+
+  const directRecipient = await supabase
     .from("campaign_recipients")
     .select("id,campaign_id,contact_id")
     .eq("tracking_token", token)
     .maybeSingle();
 
-  if (recipientError || !recipient) {
-    return NextResponse.json({ ok: false, error: "Tracking link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+  if (!directRecipient.error && directRecipient.data?.campaign_id === link.campaign_id) {
+    recipient = directRecipient.data;
   }
 
-  const { data: link, error: linkError } = await supabase
-    .from("tracked_links")
-    .select("id,destination_url")
-    .eq("id", linkId)
-    .eq("campaign_id", recipient.campaign_id)
-    .maybeSingle();
+  if (!recipient) {
+    const contactResult = await supabase
+      .from("contacts")
+      .select("id")
+      .eq("broadcast_tracking_token", token)
+      .maybeSingle();
 
-  if (linkError || !link || !validHttpDestination(link.destination_url)) {
-    return NextResponse.json({ ok: false, error: "Campaign link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+    if (!contactResult.error && contactResult.data?.id) {
+      const broadcastRecipient = await supabase
+        .from("campaign_recipients")
+        .select("id,campaign_id,contact_id")
+        .eq("campaign_id", link.campaign_id)
+        .eq("contact_id", contactResult.data.id)
+        .maybeSingle();
+      if (!broadcastRecipient.error && broadcastRecipient.data) recipient = broadcastRecipient.data;
+    }
+  }
+
+  if (!recipient) {
+    return NextResponse.json({ ok: false, error: "Tracking link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
   const userAgent = request.headers.get("user-agent") ?? "";
@@ -85,7 +108,8 @@ export async function GET(
     browser: classification.browser,
     metadata: {
       user_agent: userAgent,
-      os: classification.os
+      os: classification.os,
+      transport: "resend_broadcast"
     }
   });
 
