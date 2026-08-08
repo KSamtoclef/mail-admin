@@ -8,12 +8,18 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
   }, [error]);
 
   return (
-    <main className="systemState">
-      <div className="systemStateBox">
-        <div className="brandMark">M</div>
-        <h1>Something went wrong</h1>
-        <p>The admin workspace hit an unexpected error. Your database has not been changed by this screen.</p>
-        <button className="button buttonPrimary" onClick={reset}>Try again</button>
+    <main className="loginPane" style={{ minHeight: "100vh" }}>
+      <div className="loginCard">
+        <div className="loginBrand">
+          <div className="brandMark">M</div>
+          <div>
+            <div className="brandName">Mail Admin</div>
+            <div className="brandMeta">System error</div>
+          </div>
+        </div>
+        <h2>Something went wrong</h2>
+        <p>The workspace hit an unexpected error. Try the page again before changing any configuration.</p>
+        <button className="button buttonPrimary loginButton" onClick={reset}>Try again</button>
       </div>
     </main>
   );
