@@ -137,3 +137,18 @@ begin
   return coalesce(remaining, 0);
 end;
 $$;
+
+create or replace function mail_broadcast_transport_ready()
+returns table (
+  reserve_function boolean,
+  release_function boolean
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    to_regprocedure('public.mail_reserve_broadcast_quota(integer)') is not null,
+    to_regprocedure('public.mail_release_send_quota(integer)') is not null;
+$$;
