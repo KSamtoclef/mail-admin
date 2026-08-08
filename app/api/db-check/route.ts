@@ -10,6 +10,7 @@ const checks = [
   { name: "campaign_recipients", table: "campaign_recipients", columns: "id,campaign_id,contact_id,tracking_token,delivery_status,delivered_at" },
   { name: "tracked_links", table: "tracked_links", columns: "id,campaign_id,label,destination_url" },
   { name: "tracking_sites", table: "tracking_sites", columns: "id,name,site_url,origin,active,created_at,updated_at" },
+  { name: "send_settings", table: "send_settings", columns: "id,daily_send_limit,max_batch_size,timezone,sending_paused,updated_at" },
   { name: "sessions", table: "sessions", columns: "id,contact_id,campaign_id,recipient_id,anonymous_id,last_seen_at,country_code,region,device_type,browser,os" },
   { name: "events", table: "events", columns: "id,event_type,occurred_at,is_bot,bot_reason,country_code,region,device_type,browser,contact_id,campaign_id,recipient_id,session_id,link_id" },
   { name: "suppression_list", table: "suppression_list", columns: "id,email_normalized,reason,created_at" },
@@ -28,6 +29,14 @@ export async function GET() {
         code: result.error?.code ?? null
       };
     }));
+
+    const usageResult = await supabase.rpc("mail_daily_send_usage");
+    results.push({
+      name: "mail_daily_send_usage",
+      ok: !usageResult.error,
+      error: usageResult.error?.message ?? null,
+      code: usageResult.error?.code ?? null
+    });
 
     return NextResponse.json({
       ok: results.every((result) => result.ok),
