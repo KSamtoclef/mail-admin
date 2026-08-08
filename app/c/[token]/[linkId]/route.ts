@@ -1,36 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { classifyClient, validHttpDestination } from "@/lib/tracking-security";
 
-function classifyUserAgent(userAgent: string) {
-  const ua = userAgent.toLowerCase();
-  const scannerPatterns = [
-    "proofpoint",
-    "mimecast",
-    "barracuda",
-    "safelinks",
-    "urlscan",
-    "security scanner",
-    "email protection",
-    "crawler",
-    "spider",
-    "bot"
-  ];
-
-  const matched = scannerPatterns.find((pattern) => ua.includes(pattern));
-  const deviceType = /iphone|ipad|android|mobile/.test(ua) ? "mobile" : /windows|macintosh|linux/.test(ua) ? "desktop" : "unknown";
-
-  return {
-    isBot: Boolean(matched),
-    botReason: matched ? `user-agent:${matched}` : null,
-    deviceType
-  };
-}
+const uuid = z.string().uuid();
 
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ token: string; linkId: string }> }
 ) {
-  const { token, linkId } = await context.params;
+  const rawParams = await context.params;
+  const parsedToken = uuid.safeParse(rawParams.token);
+  const parsedLinkId = uuid.safeParse(rawParams.linkId);
+
+  if (!parsedToken.success || !parsedLinkId.success) {
+    return NextResponse.json({ ok: false, error: "Tracking link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
+  }
+
+  const token = parsedToken.data;
+  const linkId = parsedLinkId.data;
   const supabase = getSupabaseAdmin();
 
   const { data: recipient, error: recipientError } = await supabase
@@ -40,7 +28,7 @@ export async function GET(
     .maybeSingle();
 
   if (recipientError || !recipient) {
-    return NextResponse.json({ ok: false, error: "Tracking link not found" }, { status: 404 });
+    return NextResponse.json({ ok: false, error: "Tracking link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
   const { data: link, error: linkError } = await supabase
@@ -50,19 +38,19 @@ export async function GET(
     .eq("campaign_id", recipient.campaign_id)
     .maybeSingle();
 
-  if (linkError || !link) {
-    return NextResponse.json({ ok: false, error: "Campaign link not found" }, { status: 404 });
+  if (linkError || !link || !validHttpDestination(link.destination_url)) {
+    return NextResponse.json({ ok: false, error: "Campaign link not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
   const userAgent = request.headers.get("user-agent") ?? "";
   const country = request.headers.get("x-vercel-ip-country");
   const region = request.headers.get("x-vercel-ip-country-region");
-  const classification = classifyUserAgent(userAgent);
+  const classification = classifyClient(userAgent, request);
 
   let sessionId: string | null = null;
 
   if (!classification.isBot) {
-    const { data: session } = await supabase
+    const { data: session, error: sessionError } = await supabase
       .from("sessions")
       .insert({
         contact_id: recipient.contact_id,
@@ -71,15 +59,18 @@ export async function GET(
         country_code: country,
         region,
         device_type: classification.deviceType,
+        browser: classification.browser,
+        os: classification.os,
         last_seen_at: new Date().toISOString()
       })
       .select("id")
       .single();
 
+    if (sessionError) console.error("Unable to create attributed tracking session", sessionError.message);
     sessionId = session?.id ?? null;
   }
 
-  await supabase.from("events").insert({
+  const { error: eventError } = await supabase.from("events").insert({
     event_type: "email_link_click",
     campaign_id: recipient.campaign_id,
     recipient_id: recipient.id,
@@ -91,15 +82,20 @@ export async function GET(
     country_code: country,
     region,
     device_type: classification.deviceType,
+    browser: classification.browser,
     metadata: {
-      user_agent: userAgent
+      user_agent: userAgent,
+      os: classification.os
     }
   });
 
-  const destination = new URL(link.destination_url);
-  if (sessionId) {
-    destination.searchParams.set("mt_sid", sessionId);
-  }
+  if (eventError) console.error("Unable to record email_link_click event", eventError.message);
 
-  return NextResponse.redirect(destination, 302);
+  const destination = new URL(link.destination_url);
+  if (sessionId) destination.searchParams.set("mt_sid", sessionId);
+
+  const response = NextResponse.redirect(destination, 302);
+  response.headers.set("Cache-Control", "no-store, max-age=0");
+  response.headers.set("Referrer-Policy", "no-referrer");
+  return response;
 }
