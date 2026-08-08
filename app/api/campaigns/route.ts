@@ -9,7 +9,8 @@ const campaignSchema = z.object({
   reply_to: z.string().email().optional().nullable(),
   text_body: z.string().min(1).max(200000),
   tracking_mode: z.enum(["clicks_and_site", "clicks_only", "delivery_only"]).default("clicks_and_site"),
-  scheduled_at: z.string().datetime().optional().nullable()
+  scheduled_at: z.string().datetime().optional().nullable(),
+  primary_link_url: z.string().url().max(4000).optional().nullable()
 });
 
 function configured() {
