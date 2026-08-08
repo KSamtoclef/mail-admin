@@ -3,6 +3,7 @@ type SendEmailInput = {
   subject: string;
   html?: string;
   text?: string;
+  fromName?: string | null;
   replyTo?: string | null;
   headers?: Record<string, string>;
   tags?: Record<string, string>;
@@ -27,16 +28,16 @@ export function getEmailProviderStatus() {
   };
 }
 
-function buildFrom() {
+function buildFrom(overrideName?: string | null) {
   const email = process.env.DEFAULT_FROM_EMAIL;
   if (!email) throw new Error("DEFAULT_FROM_EMAIL is not configured");
-  const name = process.env.DEFAULT_FROM_NAME?.trim();
+  const name = overrideName?.trim() || process.env.DEFAULT_FROM_NAME?.trim();
   return name ? `${name} <${email}>` : email;
 }
 
 function buildPayload(input: SendEmailInput) {
   const payload: Record<string, unknown> = {
-    from: buildFrom(),
+    from: buildFrom(input.fromName),
     to: Array.isArray(input.to) ? input.to : [input.to],
     subject: input.subject
   };
