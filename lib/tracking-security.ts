@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 function normalizeOrigin(value: string | null | undefined) {
   if (!value) return null;
@@ -28,23 +29,55 @@ export function getAllowedTrackingOrigins() {
     .filter((value): value is string => Boolean(value));
 }
 
-export function trackingIsConfigured() {
-  return Boolean(getTrackingBaseUrl() && getAllowedTrackingOrigins().length);
+async function databaseOriginAllowed(origin: string) {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase
+      .from("tracking_sites")
+      .select("id")
+      .eq("origin", origin)
+      .eq("active", true)
+      .limit(1)
+      .maybeSingle();
+    return !error && Boolean(data?.id);
+  } catch {
+    return false;
+  }
+}
+
+async function databaseHasActiveSite() {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { count, error } = await supabase
+      .from("tracking_sites")
+      .select("id", { count: "exact", head: true })
+      .eq("active", true);
+    return !error && (count ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+export async function trackingIsConfigured() {
+  if (!getTrackingBaseUrl()) return false;
+  if (getAllowedTrackingOrigins().length > 0) return true;
+  return databaseHasActiveSite();
 }
 
 export function requestOrigin(request: NextRequest) {
   return normalizeOrigin(request.headers.get("origin"));
 }
 
-export function isAllowedTrackingOrigin(request: NextRequest) {
+export async function isAllowedTrackingOrigin(request: NextRequest) {
   const origin = requestOrigin(request);
   if (!origin) return false;
-  return getAllowedTrackingOrigins().includes(origin);
+  if (getAllowedTrackingOrigins().includes(origin)) return true;
+  return databaseOriginAllowed(origin);
 }
 
-export function corsHeaders(request: NextRequest) {
+export async function corsHeaders(request: NextRequest) {
   const origin = requestOrigin(request);
-  const allowed = Boolean(origin && getAllowedTrackingOrigins().includes(origin));
+  const allowed = origin ? await isAllowedTrackingOrigin(request) : false;
 
   return {
     "Access-Control-Allow-Origin": allowed && origin ? origin : "null",
