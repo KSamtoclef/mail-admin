@@ -27,7 +27,14 @@ export async function middleware(request: NextRequest) {
   const secret = process.env.ADMIN_SESSION_SECRET;
 
   if (!password || !secret) {
-    return NextResponse.next();
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ ok: false, error: "Admin authentication is not configured" }, { status: 503 });
+    }
+
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("setup", "required");
+    loginUrl.searchParams.set("next", pathname);
+    return NextResponse.redirect(loginUrl);
   }
 
   const expected = await sha256(`${password}:${secret}`);
