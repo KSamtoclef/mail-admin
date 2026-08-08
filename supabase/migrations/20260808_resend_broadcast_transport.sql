@@ -208,11 +208,63 @@ begin
 end;
 $$;
 
+create or replace function mail_set_broadcast_wave_recipient_count(target_wave uuid, new_count integer)
+returns table (
+  recipient_count integer,
+  released integer
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  s send_settings%rowtype;
+  w campaign_broadcast_waves%rowtype;
+  local_day date;
+  release_amount integer;
+begin
+  if new_count is null or new_count < 0 then
+    raise exception 'new_count must be zero or greater';
+  end if;
+
+  select * into s from send_settings where id = 1 for update;
+  if not found then
+    raise exception 'send settings are not configured';
+  end if;
+
+  select * into w from campaign_broadcast_waves where id = target_wave for update;
+  if not found then
+    raise exception 'broadcast wave not found';
+  end if;
+
+  if new_count > w.recipient_count then
+    raise exception 'recipient count cannot be increased by this function';
+  end if;
+
+  release_amount := w.recipient_count - new_count;
+  local_day := (now() at time zone s.timezone)::date;
+
+  if release_amount > 0 and w.day_key = local_day then
+    update send_daily_counters
+    set reserved_count = greatest(reserved_count - release_amount, 0),
+        updated_at = now()
+    where day_key = local_day and timezone = s.timezone;
+  end if;
+
+  update campaign_broadcast_waves
+  set recipient_count = new_count
+  where id = target_wave;
+
+  return query select new_count, release_amount;
+end;
+$$;
+
 create or replace function mail_broadcast_transport_ready()
 returns table (
   reserve_function boolean,
   release_function boolean,
-  ensure_wave_function boolean
+  ensure_wave_function boolean,
+  adjust_wave_function boolean
 )
 language sql
 stable
@@ -222,5 +274,6 @@ as $$
   select
     to_regprocedure('public.mail_reserve_broadcast_quota(integer)') is not null,
     to_regprocedure('public.mail_release_send_quota(integer)') is not null,
-    to_regprocedure('public.mail_ensure_broadcast_wave_quota(uuid)') is not null;
+    to_regprocedure('public.mail_ensure_broadcast_wave_quota(uuid)') is not null,
+    to_regprocedure('public.mail_set_broadcast_wave_recipient_count(uuid,integer)') is not null;
 $$;
