@@ -41,6 +41,18 @@ function firstRecipient(payload: any) {
   return Array.isArray(to) && typeof to[0] === "string" ? to[0].trim().toLowerCase() : null;
 }
 
+function taggedRecipientId(payload: any) {
+  const tags = payload?.data?.tags;
+  if (tags && !Array.isArray(tags) && typeof tags === "object") {
+    return typeof tags.recipient_id === "string" ? tags.recipient_id : null;
+  }
+  if (Array.isArray(tags)) {
+    const tag = tags.find((item) => item?.name === "recipient_id");
+    return typeof tag?.value === "string" ? tag.value : null;
+  }
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   const raw = await request.text();
   if (!verifySvix(raw, request)) {
@@ -58,7 +70,8 @@ export async function POST(request: NextRequest) {
   const providerMessageId = typeof payload?.data?.email_id === "string" ? payload.data.email_id : null;
   const providerEventId = request.headers.get("svix-id");
   const recipientEmail = firstRecipient(payload);
-  const supabase = getSupabaseAdmin();
+  const recipientIdTag = taggedRecipientId(payload);
+  const supabase = getSupabaseAdmin() as any;
 
   const { error: auditError } = await supabase.from("provider_webhook_events").insert({
     provider: "resend",
@@ -75,18 +88,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: auditError.message }, { status: 500 });
   }
 
-  let recipientRow: { id: string; campaign_id: string; contact_id: string } | null = null;
+  let recipientRow: { id: string; campaign_id: string; contact_id: string; provider_message_id?: string | null } | null = null;
+
   if (providerMessageId) {
     const { data } = await supabase
       .from("campaign_recipients")
-      .select("id,campaign_id,contact_id")
+      .select("id,campaign_id,contact_id,provider_message_id")
       .eq("provider_message_id", providerMessageId)
+      .maybeSingle();
+    recipientRow = data ?? null;
+  }
+
+  if (!recipientRow && recipientIdTag) {
+    const { data } = await supabase
+      .from("campaign_recipients")
+      .select("id,campaign_id,contact_id,provider_message_id")
+      .eq("id", recipientIdTag)
       .maybeSingle();
     recipientRow = data ?? null;
   }
 
   const now = typeof payload?.created_at === "string" ? payload.created_at : new Date().toISOString();
   const recipientPatch: Record<string, unknown> = {};
+
+  if (providerMessageId && recipientRow && !recipientRow.provider_message_id) {
+    recipientPatch.provider_message_id = providerMessageId;
+  }
 
   if (eventType === "email.sent") {
     recipientPatch.delivery_status = "sent";
