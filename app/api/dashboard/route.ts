@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getTrackingBaseUrl, trackingIsConfigured } from "@/lib/tracking-security";
+import { getEmailProviderStatus } from "@/lib/email-provider";
 
 function hasSupabaseConfig() {
   return Boolean(
@@ -25,8 +26,9 @@ const emptyMetrics = {
 const noStoreHeaders = { "Cache-Control": "no-store" };
 
 export async function GET() {
-  const providerConfigured = Boolean(process.env.EMAIL_PROVIDER && process.env.DEFAULT_FROM_EMAIL);
-  const trackingConfigured = trackingIsConfigured();
+  const providerStatus = getEmailProviderStatus();
+  const providerConfigured = providerStatus.configured;
+  const trackingConfigured = await trackingIsConfigured();
   const trackingBaseUrl = getTrackingBaseUrl();
   const authConfigured = Boolean(process.env.ADMIN_PASSWORD && process.env.ADMIN_SESSION_SECRET);
 
