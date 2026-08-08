@@ -50,7 +50,7 @@ export default function CookiesPilotPanel() {
 
   useEffect(() => { load(); }, []);
 
-  async function testCurl() {
+  async function testConnection() {
     setBusy(true);
     setMessage("");
     try {
@@ -58,14 +58,14 @@ export default function CookiesPilotPanel() {
       const result = await response.json();
       if (response.ok) {
         setMessage(result.skipped
-          ? "Cookies Pilot is disabled, so the CURL was skipped."
-          : `CURL responded${result.httpStatus ? ` HTTP ${result.httpStatus}` : ""} in ${result.durationMs ?? 0} ms.`);
+          ? "Connection test skipped."
+          : `Connection successful${result.httpStatus ? ` · HTTP ${result.httpStatus}` : ""} · ${result.durationMs ?? 0} ms`);
       } else {
-        setMessage(result.error ?? "Cookies Pilot CURL test failed.");
+        setMessage(result.error ?? "Connection test failed.");
       }
       await load();
     } catch {
-      setMessage("Cookies Pilot CURL test did not complete.");
+      setMessage("Connection test did not complete.");
     } finally {
       setBusy(false);
     }
@@ -79,30 +79,29 @@ export default function CookiesPilotPanel() {
         <h2>Cookies Pilot</h2>
         <div className="pageActions">
           <button className="button" type="button" onClick={load}><RefreshCw size={14} /> Refresh</button>
-          <button className="button buttonPrimary" type="button" disabled={busy || !status?.enabled || !status?.endpointConfigured} onClick={testCurl}><TestTube2 size={14} /> {busy ? "Testing…" : "Test CURL"}</button>
+          <button className="button buttonPrimary" type="button" disabled={busy || !status?.enabled || !status?.endpointConfigured} onClick={testConnection}><TestTube2 size={14} /> {busy ? "Testing…" : "Test connection"}</button>
         </div>
       </div>
 
       <div className="statusList">
-        <StatusLine label="Integration" ready={Boolean(status?.enabled)} text={status?.enabled ? "Enabled · campaign runs pass through Cookies Pilot before Resend" : "Set COOKIE_PILOT_ENABLED=true to use the CURL gate"} />
-        <StatusLine label="Cloud365 CURL" ready={Boolean(status?.endpointConfigured)} text={status?.endpointError ?? status?.endpointLabel ?? "COOKIE_PILOT_ENDPOINT required"} />
-        <StatusLine label="Connect ID" ready={Boolean(status?.connectIdConfigured)} text={status?.connectIdConfigured ? "Stored server-side" : "COOKIE_PILOT_CONNECT_ID not configured"} />
-        <StatusLine label="API key" ready={Boolean(status?.apiKeyConfigured)} text={status?.apiKeyConfigured ? "Stored server-side · not exposed to browser" : "COOKIE_PILOT_API_KEY not configured"} />
-        <StatusLine label="Configured email" ready={Boolean(status?.emailConfigured)} text={status?.emailConfigured ? "Stored server-side" : "COOKIE_PILOT_EMAIL not configured"} />
-        <StatusLine label="Audit log" ready={Boolean(status?.auditReady)} text={status?.auditReady ? "Connection checks are being recorded" : "Run the Cookies Pilot database migration"} />
+        <StatusLine label="Integration" ready={Boolean(status?.enabled)} text={status?.enabled ? "Enabled" : "Disabled"} />
+        <StatusLine label="Endpoint" ready={Boolean(status?.endpointConfigured)} text={status?.endpointError ?? status?.endpointLabel ?? "Not configured"} />
+        <StatusLine label="Connect ID" ready={Boolean(status?.connectIdConfigured)} text={status?.connectIdConfigured ? "Configured" : "Not configured"} />
+        <StatusLine label="API key" ready={Boolean(status?.apiKeyConfigured)} text={status?.apiKeyConfigured ? "Configured" : "Not configured"} />
+        <StatusLine label="Account email" ready={Boolean(status?.emailConfigured)} text={status?.emailConfigured ? "Configured" : "Not configured"} />
+        <StatusLine label="Audit log" ready={Boolean(status?.auditReady)} text={status?.auditReady ? "Active" : "Unavailable"} />
       </div>
 
       <div style={{ padding: "0 15px 15px" }}>
-        <p className="formHelp">The supplied Cookies Pilot package only demonstrates calling the generated Cloud365 endpoint. Mail Admin therefore uses the documented CURL as a server-side GET and waits for the provider's approximately 3-second processing window. It does not invent undocumented authentication headers.</p>
         {latest ? (
           <div className="fileLine">
             <div>
-              <strong>{latest.ok ? "Last CURL check succeeded" : "Last CURL check failed"}</strong>
-              <span>{latest.purpose === "pre_send" ? "Campaign pre-send" : "Manual test"} · {latest.http_status ? `HTTP ${latest.http_status} · ` : ""}{latest.duration_ms} ms · {new Date(latest.created_at).toLocaleString()}</span>
+              <strong>{latest.ok ? "Last connection check succeeded" : "Last connection check failed"}</strong>
+              <span>{latest.purpose === "pre_send" ? "Pre-send" : "Manual test"} · {latest.http_status ? `HTTP ${latest.http_status} · ` : ""}{latest.duration_ms} ms · {new Date(latest.created_at).toLocaleString()}</span>
               {latest.error ? <span>{latest.error}</span> : null}
             </div>
           </div>
-        ) : <div className="emptyState">No Cookies Pilot CURL check has been recorded yet.</div>}
+        ) : <div className="emptyState">No connection checks recorded.</div>}
         {message ? <div className="inlineMessage pageMessage">{message}</div> : null}
       </div>
     </section>
